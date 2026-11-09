@@ -40,7 +40,7 @@ func (s *Server) publicSettings(ctx context.Context, u *store.User, st store.Set
 		"core_configured": s.core.Configured(), "core_registered": s.coreStatus()["registered"],
 		"title": st.Title, "date_format": st.DateFormat, "time_format": st.TimeFormat, "week_start": st.WeekStart,
 		"export_format": st.ExportFormat, "export_quality": st.ExportQuality, "export_max_edge": st.ExportMaxEdge, "export_name": st.ExportName,
-		"save_to": st.SaveTo, "files_folder": st.FilesFolder,
+		"save_to": st.SaveTo, "files_folder": st.FilesFolder, "keep_date": st.KeepDate, "keep_camera": st.KeepCamera, "stack_photos": st.StackPhotos,
 		"preview_size": st.PreviewSize, "show_grid": st.ShowGrid, "histogram": st.Histogram, "compare_style": st.CompareStyle, "confirm_leave": st.ConfirmLeave, "sort": st.Sort,
 		"photos_url": st.PhotosURL, "photos_token": mask(st.PhotosToken), "photos_public_url": st.PhotosPublicURL,
 		"files_url": st.FilesURL, "files_token": mask(st.FilesToken), "files_public_url": st.FilesPublicURL,
@@ -174,6 +174,9 @@ func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	boolIn("show_grid", &cur.ShowGrid, in.ShowGrid)
+	boolIn("keep_date", &cur.KeepDate, in.KeepDate)
+	boolIn("keep_camera", &cur.KeepCamera, in.KeepCamera)
+	boolIn("stack_photos", &cur.StackPhotos, in.StackPhotos)
 	boolIn("histogram", &cur.Histogram, in.Histogram)
 	boolIn("confirm_leave", &cur.ConfirmLeave, in.ConfirmLeave)
 	boolIn("ai_photos", &cur.AIPhotos, in.AIPhotos)

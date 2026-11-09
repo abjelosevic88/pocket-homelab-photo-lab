@@ -33,6 +33,7 @@ type Info struct {
 	Height      int
 	Orientation int    // EXIF 1–8, 1 = as stored
 	TakenAt     string // from EXIF, "2006-01-02T15:04:05", "" when unknown
+	Camera      string // "Make Model" from EXIF
 	Decodable   bool   // the server can read the pixels (and so make a thumbnail)
 }
 
@@ -106,7 +107,9 @@ func Probe(data []byte) (Info, error) {
 		return in, ErrUnsupported
 	}
 	if in.Mime == "image/jpeg" {
-		in.Orientation, in.TakenAt = jpegExif(data)
+		var mk, md string
+		in.Orientation, in.TakenAt, mk, md = jpegExifAll(data)
+		in.Camera = cameraName(mk, md)
 	}
 	cfg, _, err := image.DecodeConfig(bytes.NewReader(data))
 	if err == nil {
@@ -268,3 +271,18 @@ func orient(img image.Image, o int) image.Image {
 	}
 	return dst
 }
+
+// cameraName joins make and model without repeating the brand ("Apple iPhone 15", not "Apple Apple iPhone 15").
+func cameraName(mk, md string) string {
+	mk, md = strings.TrimSpace(mk), strings.TrimSpace(md)
+	if mk == "" || strings.HasPrefix(strings.ToLower(md), strings.ToLower(strings.Fields(mk + " x")[0])) {
+		return md
+	}
+	if md == "" {
+		return mk
+	}
+	return mk + " " + md
+}
+
+// CameraName is cameraName for callers outside (Pocket Photos' EXIF).
+func CameraName(mk, md string) string { return cameraName(mk, md) }

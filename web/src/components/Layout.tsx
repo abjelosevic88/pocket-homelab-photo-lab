@@ -5,7 +5,9 @@ import { Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { api, V1 } from '../lib/api'
 import { useApp } from '../lib/app-context'
 import type { HomeData, Image, ImportResult, Sources } from '../lib/types'
-import { importSummary, uploadMany } from '../lib/images'
+import { importSummary, originalURL, saveLook, uploadMany } from '../lib/images'
+import { encode, loadBitmap, render } from '../lib/render/engine'
+import { isEdited } from '../lib/recipe'
 import { Icon } from './icons'
 import { Sidebar } from './Sidebar'
 import { CommandPalette, type PaletteCommand } from './CommandPalette'
@@ -80,6 +82,26 @@ export default function Layout() {
   useEffect(() => { load() }, [loc.pathname, load])
   useEffect(() => { loadSources() }, [loadSources])
   useOnChange(() => { load(); loadSources() })
+
+  // looks an app changed (Pocket AI): draw them here, one at a time, quietly
+  const drawing = useRef(false)
+  const drawStale = useCallback(async () => {
+    if (drawing.current) return
+    drawing.current = true
+    try {
+      const list = await api.get<Image[]>(`${V1}/images/stale`)
+      for (const im of list) {
+        try {
+          const bmp = await loadBitmap(originalURL(im))
+          if (isEdited(im.recipe || {})) await saveLook(im.id, await encode(await render(bmp, bmp.width, bmp.height, im.recipe || {}, { maxEdge: 2048 }), 'jpeg', 0.88))
+          else await fetch(`${V1}/images/${im.id}/look?reset=1`, { method: 'PUT', credentials: 'same-origin' })
+          bmp.close()
+        } catch { /* a picture this browser can't open: left for another */ }
+      }
+      if (list.length) window.dispatchEvent(new CustomEvent('plab:changed'))
+    } catch { /* offline */ } finally { drawing.current = false }
+  }, [])
+  useEffect(() => { drawStale(); const t = window.setInterval(drawStale, 60_000); return () => window.clearInterval(t) }, [drawStale])
 
   const [palette, setPalette] = useState(false)
   const [shortcuts, setShortcuts] = useState(false)

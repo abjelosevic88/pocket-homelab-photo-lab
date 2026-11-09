@@ -282,6 +282,11 @@ func (c *Client) UploadPhoto(ctx context.Context, name, mime string, data []byte
 	return out.ID, nil
 }
 
+// Stack puts photos in one Immich stack, the first on top.
+func (c *Client) Stack(ctx context.Context, ids []string) error {
+	return c.do(ctx, http.MethodPost, "/api/v1/immich/stacks", nil, map[string]any{"assetIds": ids}, nil)
+}
+
 // ---------------- Pocket Files ----------------
 
 // Space is a place in Pocket Files (My files, a mount, a share).

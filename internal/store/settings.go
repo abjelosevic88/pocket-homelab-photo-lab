@@ -15,7 +15,7 @@ var boxKeys = map[string]bool{"title": true, "setup_complete": true}
 // defaults returns the settings a person starts with.
 func (s *Store) defaults() Settings {
 	return Settings{Title: DefaultTitle, DateFormat: "auto", TimeFormat: "auto", WeekStart: 1,
-		ExportFormat: "jpeg", ExportQuality: 0.92, ExportName: "{title}-edited", SaveTo: "download", FilesFolder: "/Photo Lab",
+		ExportFormat: "jpeg", ExportQuality: 0.92, ExportName: "{title}-edited", SaveTo: "download", FilesFolder: "/Photo Lab", KeepDate: true, StackPhotos: true,
 		PreviewSize: 2048, ShowGrid: true, Histogram: true, CompareStyle: "hold", ConfirmLeave: true, Sort: "recent",
 		AIProvider: "auto", AIPhotos: true}
 }

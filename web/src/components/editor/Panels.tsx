@@ -533,6 +533,7 @@ export function InfoPanel({ ed, onMeta, saveVersion }: { ed: Ed; onMeta: (p: { t
         <div><dt>Finished</dt><dd>{fw}×{fh}</dd></div>
         <div><dt>From</dt><dd>{sourceName(im.source)}{im.source === 'photos' && photosURL ? <> · <a href={photosURL} target="_blank" rel="noreferrer">open Pocket Photos</a></> : ''}{im.source_name ? <span className="muted"> · {im.source_name}</span> : ''}</dd></div>
         {im.taken_at && <div><dt>Taken</dt><dd>{fmtDateTime(im.taken_at)}</dd></div>}
+        {im.camera && <div><dt>Camera</dt><dd>{im.camera}</dd></div>}
         <div><dt>Added</dt><dd>{fmtDateTime(im.created_at)}</dd></div>
         {im.exports > 0 && <div><dt>Saved</dt><dd>{im.exports} {im.exports === 1 ? 'time' : 'times'}, last {fmtDateTime(im.last_export_at)}</dd></div>}
         <div><dt>Edits</dt><dd>{done.length ? done.join(', ') : <span className="muted">none yet</span>}</dd></div>

@@ -8,6 +8,12 @@ import (
 // jpegExif reads the orientation (tag 0x0112) and the date taken (0x9003,
 // else 0x0132) from a JPEG's EXIF block. Anything unreadable gives 1 and "".
 func jpegExif(data []byte) (orientation int, taken string) {
+	orientation, taken, _, _ = jpegExifAll(data)
+	return
+}
+
+// jpegExifAll also reads the camera's make and model.
+func jpegExifAll(data []byte) (orientation int, taken, make_, model string) {
 	orientation = 1
 	if len(data) < 4 || data[0] != 0xFF || data[1] != 0xD8 {
 		return
@@ -34,7 +40,7 @@ func jpegExif(data []byte) (orientation int, taken string) {
 	return
 }
 
-func parseTIFF(t []byte) (orientation int, taken string) {
+func parseTIFF(t []byte) (orientation int, taken, make_, model string) {
 	orientation = 1
 	if len(t) < 8 {
 		return
@@ -79,6 +85,10 @@ func parseTIFF(t []byte) (orientation int, taken string) {
 			}
 		case 0x0132:
 			modified = str(count, val)
+		case 0x010F:
+			make_ = shortStr(t, bo, typ, count, val, raw)
+		case 0x0110:
+			model = shortStr(t, bo, typ, count, val, raw)
 		case 0x8769:
 			exifIFD = val
 		}
@@ -122,4 +132,18 @@ func ispeSize(data []byte) (int, int) {
 		}
 	}
 	return 0, 0
+}
+
+// shortStr reads an ASCII value that may sit inside the entry itself (4 bytes or less).
+func shortStr(t []byte, bo binary.ByteOrder, typ uint16, count, val uint32, raw []byte) string {
+	if typ != 2 || count == 0 {
+		return ""
+	}
+	if count <= 4 {
+		return strings.TrimRight(string(raw[:count]), "\x00 ")
+	}
+	if int(val)+int(count) > len(t) {
+		return ""
+	}
+	return strings.TrimSpace(strings.TrimRight(string(t[val:val+count]), "\x00 "))
 }

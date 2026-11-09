@@ -6,6 +6,7 @@ import type { Format, Image, SaveTo } from '../lib/types'
 import type { Recipe } from '../lib/recipe'
 import { canAVIF, encode, EXT, finalSize, imageSize, MAX_AREA, render } from '../lib/render/engine'
 import { downloadBlob, fileName, sendExport } from '../lib/images'
+import { withExif } from '../lib/exif'
 import { fmtBytes } from '../lib/format'
 import { Icon } from './icons'
 import { Select } from './Select'
@@ -66,13 +67,13 @@ export function ExportDialog({ image, recipe, src, onClose, onSaved }: { image: 
     setBusy('Making the picture…')
     try {
       const canvas = await render(src, src.width, src.height, recipe, { maxEdge: o.edge || undefined, maxArea: MAX_AREA, transparent: o.format !== 'jpeg' })
-      const blob = await encode(canvas, o.format, o.quality, recipe.frame?.color || '#ffffff')
+      const blob = await withExif(await encode(canvas, o.format, o.quality, recipe.frame?.color || '#ffffff'), { taken: settings?.keep_date !== false ? image.taken_at : '', camera: settings?.keep_camera ? image.camera : '' })
       const file = `${name || 'picture'}.${EXT[o.format]}`
       setBusy(o.dest === 'download' ? 'Saving…' : o.dest === 'photos' ? 'Sending to Pocket Photos…' : 'Sending to Pocket Files…')
       if (o.dest === 'download') downloadBlob(blob, file)
       const r = await sendExport({ image_id: image.id, destination: o.dest, name: file, format: o.format, width: canvas.width, height: canvas.height, bytes: blob.size, folder: o.folder }, o.dest === 'download' ? undefined : blob)
       setDone({ bytes: blob.size, url: r.open_url })
-      toast(o.dest === 'download' ? `Saved ${file}` : o.dest === 'photos' ? 'Added to Pocket Photos as a new photo' : `Saved to Pocket Files: ${r.export.target}`)
+      toast(o.dest === 'download' ? `Saved ${file}` : o.dest === 'photos' ? ((r as { stacked?: boolean }).stacked ? 'Added to Pocket Photos, stacked on the original' : 'Added to Pocket Photos as a new photo') : `Saved to Pocket Files: ${r.export.target}`)
       onSaved()
     } catch (e) { toast(errMsg(e), 'err') } finally { setBusy('') }
   }
@@ -82,7 +83,7 @@ export function ExportDialog({ image, recipe, src, onClose, onSaved }: { image: 
       <div className="grid" style={{ gap: 14 }}>
         <Field label="Name"><div className="input-suffix"><input value={name} onChange={e => setName(e.target.value)} /><span className="muted">.{EXT[o.format]}</span></div></Field>
         <SaveFields o={o} setO={setO} w={w} h={h} />
-        <p className="muted small">{out[0]}×{out[1]} pixels. Saved pictures carry no location or camera details. The lab keeps your edit, so you can come back and change it.</p>
+        <p className="muted small">{out[0]}×{out[1]} pixels. {o.format === 'jpeg' && settings?.keep_date !== false && image.taken_at ? `The date taken goes with it${settings?.keep_camera && image.camera ? ', and the camera' : ''}; never the location. ` : 'No location or camera details go with it. '}The lab keeps your edit, so you can come back and change it.</p>
         {done && <div className="callout ok"><Icon name="check-circle" size={15} /><span>Saved ({fmtBytes(done.bytes)}).{done.url && <> <a href={done.url} target="_blank" rel="noreferrer">Open {o.dest === 'photos' ? 'Pocket Photos' : 'Pocket Files'}</a></>}</span></div>}
       </div>
     </Modal>

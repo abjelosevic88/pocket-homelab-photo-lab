@@ -350,3 +350,31 @@ func TestSafeName(t *testing.T) {
 }
 
 func itoa(n int64) string { b, _ := json.Marshal(n); return string(b) }
+
+func TestApplyChangesTheEdit(t *testing.T) {
+	a := newApp(t, nil)
+	_, m := a.upload(a.alice, "a.png", testPNG(400, 200, color.RGBA{90, 120, 200, 255}))
+	id := firstID(t, m)
+	a.expect(201, a.alice, "POST", "/api/v1/presets", map[string]any{"name": "Warm evening", "recipe": map[string]any{"adjust": map[string]any{"temperature": 25}}})
+	out := a.expect(200, a.alice, "POST", "/api/v1/images/apply", map[string]any{"ids": []int64{id}, "look": "film", "strength": 60, "adjust": map[string]any{"exposure": 250}, "aspect": "1:1", "long_edge": 100})
+	im := out["items"].([]any)[0].(map[string]any)
+	rec := im["recipe"].(map[string]any)
+	crop := rec["crop"].(map[string]any)
+	if rec["look"].(map[string]any)["name"] != "film" || rec["adjust"].(map[string]any)["exposure"] != 100.0 || crop["w"] != 0.5 || crop["h"] != 1.0 || im["stale"] != true {
+		t.Fatalf("apply = %v", im)
+	}
+	if rs := rec["resize"].(map[string]any); rs["w"] != 100.0 || rs["h"] != 100.0 {
+		t.Fatalf("resize = %v", rs)
+	}
+	out = a.expect(200, a.alice, "POST", "/api/v1/images/apply", map[string]any{"ids": []int64{id}, "look": "Warm evening"})
+	rec = out["items"].([]any)[0].(map[string]any)["recipe"].(map[string]any)
+	if rec["look"] != nil || rec["adjust"].(map[string]any)["temperature"] != 25.0 || rec["crop"] == nil {
+		t.Fatalf("own look = %v", rec)
+	}
+	if l := a.expect(200, a.alice, "GET", "/api/v1/images?show=stale", nil); num(l, "total") != 1 {
+		t.Fatalf("stale list = %v", l)
+	}
+	a.expect(400, a.alice, "POST", "/api/v1/images/apply", map[string]any{"ids": []int64{id}, "look": "nope"})
+	a.expect(400, a.alice, "POST", "/api/v1/images/apply", map[string]any{"ids": []int64{id}, "adjust": map[string]any{"wobble": 3}})
+	a.expect(404, a.bob, "POST", "/api/v1/images/apply", map[string]any{"ids": []int64{id}, "look": "film"})
+}

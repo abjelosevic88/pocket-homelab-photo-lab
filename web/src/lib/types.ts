@@ -12,7 +12,7 @@ export interface Settings {
   core_configured: boolean
   core_registered?: boolean
   title: string; date_format: string; time_format: string; week_start: number
-  export_format: Format; export_quality: number; export_max_edge: number; export_name: string; save_to: SaveTo; files_folder: string
+  export_format: Format; export_quality: number; export_max_edge: number; export_name: string; save_to: SaveTo; files_folder: string; keep_date: boolean; keep_camera: boolean; stack_photos: boolean
   preview_size: number; show_grid: boolean; histogram: boolean; compare_style: 'hold' | 'split'; confirm_leave: boolean; sort: string
   photos_mode: ConnMode; photos_via: ConnVia; photos_detail: string; photos_open_url: string; photos_configured: boolean
   photos_url: string; photos_token: string; photos_public_url: string
@@ -26,7 +26,7 @@ export interface Image {
   id: number; title: string; mime: string; width: number; height: number; bytes: number; sha256: string
   source: string; source_ref: string; source_name: string; recipe: Recipe; edited: boolean; has_preview: boolean
   favorite: boolean; note: string; taken_at: string; exports: number; last_export_at: string; edited_at: string
-  created_at: string; updated_at: string; versions: number
+  created_at: string; updated_at: string; versions: number; camera: string; stale: boolean
 }
 export interface Version { id: number; image_id: number; name: string; recipe: Recipe; has_thumb: boolean; created_at: string }
 export interface Preset { id: number; name: string; recipe: Recipe; has_thumb: boolean; sort: number; created_at: string; updated_at: string }

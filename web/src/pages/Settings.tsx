@@ -157,6 +157,11 @@ function Saving() {
           <Segmented value={f.save_to} onChange={v => setF({ ...f, save_to: v })} options={[{ value: 'download', label: 'This device' }, { value: 'photos', label: 'Pocket Photos', disabled: !f.photos_configured, title: f.photos_configured ? undefined : 'Connect Pocket Photos first' }, { value: 'files', label: 'Pocket Files', disabled: !f.files_configured, title: f.files_configured ? undefined : 'Connect Pocket Files first' }]} />
         </SettingRow>
         <SettingRow title="Folder in Pocket Files" help="In My files; made when it isn't there."><input value={f.files_folder} onChange={e => setF({ ...f, files_folder: e.target.value })} placeholder="/Photo Lab" /></SettingRow>
+        <SettingRow title="Stack on the original in Pocket Photos" help="A copy of a picture that came from Pocket Photos goes on top of its original, in one stack, instead of beside it."><Switch checked={f.stack_photos} onChange={v => setF({ ...f, stack_photos: v })} label="Stack" /></SettingRow>
+      </Section>
+      <Section title="What goes with the picture" icon="info" sub="Browsers drop all details when they make a picture. These are put back into JPEG copies; the location never is.">
+        <SettingRow title="The date taken" help="So the copy sorts next to the original in your photo apps."><Switch checked={f.keep_date} onChange={v => setF({ ...f, keep_date: v })} label="Date taken" /></SettingRow>
+        <SettingRow title="The camera" help="Its make and model, e.g. Apple iPhone 15."><Switch checked={f.keep_camera} onChange={v => setF({ ...f, keep_camera: v })} label="Camera" /></SettingRow>
         {!coreOn && <CoreHint />}
       </Section>
       <div className="row"><button type="button" className="btn primary" onClick={() => save()} disabled={busy}>Save changes</button></div>

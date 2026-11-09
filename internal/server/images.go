@@ -96,6 +96,7 @@ type newImage struct {
 	takenAt   string
 	thumb     []byte // from the browser, for pictures the server can't read
 	note      string
+	camera    string
 }
 
 // addImage stores a picture (or finds the one already there) for person uid.
@@ -152,7 +153,8 @@ func (s *Server) addImage(ctx context.Context, uid int64, in newImage) (*store.I
 		taken = info.TakenAt
 	}
 	im := &store.Image{Title: clip(title, 200), File: rel, Mime: mime, Width: info.Width, Height: info.Height, Bytes: int64(len(data)), SHA256: sha,
-		Source: firstNonEmpty(in.source, "upload"), SourceRef: in.sourceRef, SourceName: clip(in.name, 255), TakenAt: taken, Note: clip(in.note, 2000)}
+		Source: firstNonEmpty(in.source, "upload"), SourceRef: in.sourceRef, SourceName: clip(in.name, 255), TakenAt: taken, Note: clip(in.note, 2000),
+		Camera: clip(firstNonEmpty(in.camera, info.Camera), 120)}
 	if err := s.store.CreateImage(ctx, uid, im, thumb); err != nil {
 		_ = os.Remove(s.filePath(rel))
 		return nil, false, err

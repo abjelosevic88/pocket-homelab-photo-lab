@@ -7,6 +7,7 @@ import { applyLook, clean, isEdited, LOOKS, type Recipe } from '../lib/recipe'
 import { encode, EXT, loadBitmap, MAX_AREA, render } from '../lib/render/engine'
 import { downloadBlob, fileName, originalURL, saveLook, sendExport } from '../lib/images'
 import { makeZip } from '../lib/zip'
+import { withExif } from '../lib/exif'
 import { useApp } from '../lib/app-context'
 import { Icon } from './icons'
 import { Select } from './Select'
@@ -47,7 +48,7 @@ export function BatchDialog({ images, onClose, onDone, initialLook = '' }: { ima
           await saveLook(im.id, await encode(prev, 'jpeg', 0.88))
         } else {
           const c = await render(bmp, bmp.width, bmp.height, r, { maxEdge: o.edge || undefined, maxArea: MAX_AREA, transparent: o.format !== 'jpeg' })
-          const blob = await encode(c, o.format, o.quality, r.frame?.color || '#ffffff')
+          const blob = await withExif(await encode(c, o.format, o.quality, r.frame?.color || '#ffffff'), { taken: settings?.keep_date !== false ? im.taken_at : '', camera: settings?.keep_camera ? im.camera : '' })
           const name = `${fileName(pattern, im, c.width, c.height, i + 1)}.${EXT[o.format]}`
           if (o.dest === 'download') zip.push({ name, blob })
           await sendExport({ image_id: im.id, destination: o.dest, name, format: o.format, width: c.width, height: c.height, bytes: blob.size, folder: o.folder }, o.dest === 'download' ? undefined : blob)

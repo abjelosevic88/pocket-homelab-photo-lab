@@ -55,6 +55,8 @@ func (s *Server) Router() http.Handler {
 			r.Get("/images", s.handleListImages)
 			r.Post("/images", s.handleUpload)
 			r.Post("/images/import", s.handleImport)
+			r.Post("/images/apply", s.handleApply)
+			r.Get("/images/stale", s.handleStale)
 			r.Get("/images/{id}", s.handleGetImage)
 			r.Put("/images/{id}", s.handleUpdateImage)
 			r.Delete("/images/{id}", s.handleDeleteImage)

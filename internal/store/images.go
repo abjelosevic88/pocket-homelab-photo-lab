@@ -8,14 +8,14 @@ import (
 )
 
 const imageCols = `id, user_id, title, file, mime, width, height, bytes, sha256, source, source_ref, source_name, recipe, edited, preview,
-	favorite, note, taken_at, exports, last_export_at, edited_at, created_at, updated_at,
+	favorite, note, taken_at, exports, last_export_at, edited_at, created_at, updated_at, camera, stale,
 	(SELECT COUNT(1) FROM versions v WHERE v.image_id = images.id)`
 
 func scanImage(sc interface{ Scan(...any) error }) (*Image, error) {
 	var im Image
 	var recipe string
 	if err := sc.Scan(&im.ID, &im.UserID, &im.Title, &im.File, &im.Mime, &im.Width, &im.Height, &im.Bytes, &im.SHA256, &im.Source, &im.SourceRef, &im.SourceName,
-		&recipe, &im.Edited, &im.Preview, &im.Favorite, &im.Note, &im.TakenAt, &im.Exports, &im.LastExportAt, &im.EditedAt, &im.CreatedAt, &im.UpdatedAt, &im.Versions); err != nil {
+		&recipe, &im.Edited, &im.Preview, &im.Favorite, &im.Note, &im.TakenAt, &im.Exports, &im.LastExportAt, &im.EditedAt, &im.CreatedAt, &im.UpdatedAt, &im.Camera, &im.Stale, &im.Versions); err != nil {
 		return nil, err
 	}
 	im.Recipe = rawJSON(recipe)
@@ -36,10 +36,10 @@ func (s *Store) CreateImage(ctx context.Context, uid int64, im *Image, thumb []b
 		im.Recipe = json.RawMessage(`{}`)
 	}
 	now := Now()
-	res, err := s.DB.ExecContext(ctx, `INSERT INTO images (user_id, title, file, mime, width, height, bytes, sha256, source, source_ref, source_name, recipe, edited, preview, thumb, favorite, note, taken_at, edited_at, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+	res, err := s.DB.ExecContext(ctx, `INSERT INTO images (user_id, title, file, mime, width, height, bytes, sha256, source, source_ref, source_name, recipe, edited, preview, thumb, favorite, note, taken_at, edited_at, created_at, updated_at, camera)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		uid, im.Title, im.File, im.Mime, im.Width, im.Height, im.Bytes, im.SHA256, im.Source, im.SourceRef, im.SourceName, string(im.Recipe), boolInt(im.Edited), im.Preview, thumb,
-		boolInt(im.Favorite), im.Note, im.TakenAt, im.EditedAt, now, now)
+		boolInt(im.Favorite), im.Note, im.TakenAt, im.EditedAt, now, now, im.Camera)
 	if err != nil {
 		return err
 	}
@@ -90,6 +90,8 @@ func (s *Store) ListImages(ctx context.Context, uid int64, f ImageFilter) ([]Ima
 		where = append(where, "edited = 0")
 	case "favorites":
 		where = append(where, "favorite = 1")
+	case "stale":
+		where = append(where, "stale = 1")
 	case "photos", "files", "upload", "collage", "copy":
 		where = append(where, "source = ?")
 		args = append(args, f.Show)
@@ -132,8 +134,8 @@ func (s *Store) ListImages(ctx context.Context, uid int64, f ImageFilter) ([]Ima
 // UpdateImage saves the title, note, favourite and the edit.
 func (s *Store) UpdateImage(ctx context.Context, uid int64, im *Image) error {
 	now := Now()
-	res, err := s.DB.ExecContext(ctx, `UPDATE images SET title = ?, note = ?, favorite = ?, recipe = ?, edited = ?, edited_at = ?, updated_at = ? WHERE user_id = ? AND id = ?`,
-		im.Title, im.Note, boolInt(im.Favorite), string(im.Recipe), boolInt(im.Edited), im.EditedAt, now, uid, im.ID)
+	res, err := s.DB.ExecContext(ctx, `UPDATE images SET title = ?, note = ?, favorite = ?, recipe = ?, edited = ?, edited_at = ?, stale = ?, updated_at = ? WHERE user_id = ? AND id = ?`,
+		im.Title, im.Note, boolInt(im.Favorite), string(im.Recipe), boolInt(im.Edited), im.EditedAt, boolInt(im.Stale), now, uid, im.ID)
 	if err != nil {
 		return err
 	}
@@ -146,7 +148,7 @@ func (s *Store) UpdateImage(ctx context.Context, uid int64, im *Image) error {
 
 // SetImageLook stores the rendered preview file and thumbnail of the current edit.
 func (s *Store) SetImageLook(ctx context.Context, uid, id int64, preview string, thumb []byte) error {
-	res, err := s.DB.ExecContext(ctx, `UPDATE images SET preview = ?, thumb = ? WHERE user_id = ? AND id = ?`, preview, thumb, uid, id)
+	res, err := s.DB.ExecContext(ctx, `UPDATE images SET preview = ?, thumb = ?, stale = 0 WHERE user_id = ? AND id = ?`, preview, thumb, uid, id)
 	if err != nil {
 		return err
 	}
@@ -410,4 +412,64 @@ func (s *Store) StatsFor(ctx context.Context, uid int64) Stats {
 	_ = s.DB.QueryRowContext(ctx, `SELECT COUNT(1) FROM presets WHERE user_id = ?`, uid).Scan(&st.Presets)
 	_ = s.DB.QueryRowContext(ctx, `SELECT COUNT(1) FROM exports WHERE user_id = ?`, uid).Scan(&st.Exports)
 	return st
+}
+
+// ---- fonts ----
+
+// Font is a typeface of one's own for text on pictures.
+type Font struct {
+	ID        int64  `json:"id"`
+	UserID    int64  `json:"-"`
+	Name      string `json:"name"`
+	File      string `json:"-"`
+	Mime      string `json:"mime"`
+	Bytes     int64  `json:"bytes"`
+	CreatedAt string `json:"created_at"`
+}
+
+// CreateFont saves a font whose file is already on disk.
+func (s *Store) CreateFont(ctx context.Context, uid int64, f *Font) error {
+	now := Now()
+	res, err := s.DB.ExecContext(ctx, `INSERT INTO fonts (user_id, name, file, mime, bytes, created_at) VALUES (?, ?, ?, ?, ?, ?)`, uid, f.Name, f.File, f.Mime, f.Bytes, now)
+	if err != nil {
+		return err
+	}
+	f.ID, _ = res.LastInsertId()
+	f.UserID, f.CreatedAt = uid, now
+	return nil
+}
+
+// ListFonts returns a person's fonts.
+func (s *Store) ListFonts(ctx context.Context, uid int64) ([]Font, error) {
+	rows, err := s.DB.QueryContext(ctx, `SELECT id, name, file, mime, bytes, created_at FROM fonts WHERE user_id = ? ORDER BY name COLLATE NOCASE`, uid)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []Font{}
+	for rows.Next() {
+		var f Font
+		if err := rows.Scan(&f.ID, &f.Name, &f.File, &f.Mime, &f.Bytes, &f.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, f)
+	}
+	return out, rows.Err()
+}
+
+// GetFont returns one of a person's fonts.
+func (s *Store) GetFont(ctx context.Context, uid, id int64) (*Font, error) {
+	var f Font
+	err := s.DB.QueryRowContext(ctx, `SELECT id, name, file, mime, bytes, created_at FROM fonts WHERE user_id = ? AND id = ?`, uid, id).Scan(&f.ID, &f.Name, &f.File, &f.Mime, &f.Bytes, &f.CreatedAt)
+	return &f, notFound(err)
+}
+
+// DeleteFont removes a font and returns it (for its file).
+func (s *Store) DeleteFont(ctx context.Context, uid, id int64) (*Font, error) {
+	f, err := s.GetFont(ctx, uid, id)
+	if err != nil {
+		return nil, err
+	}
+	_, err = s.DB.ExecContext(ctx, `DELETE FROM fonts WHERE user_id = ? AND id = ?`, uid, id)
+	return f, err
 }

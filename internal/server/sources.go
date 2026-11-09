@@ -238,7 +238,11 @@ func (s *Server) handleImport(w http.ResponseWriter, r *http.Request) {
 			if len(taken) > 19 {
 				taken = taken[:19]
 			}
-			im, fresh, err := s.addImage(ctx, uid, newImage{data: data, name: a.OriginalFileName, source: "photos", sourceRef: id, takenAt: taken})
+			camera := ""
+			if a.ExifInfo != nil {
+				camera = imaging.CameraName(a.ExifInfo.Make, a.ExifInfo.Model)
+			}
+			im, fresh, err := s.addImage(ctx, uid, newImage{data: data, name: a.OriginalFileName, source: "photos", sourceRef: id, takenAt: taken, camera: camera})
 			if e := keep(a.OriginalFileName, im, fresh, err); e != nil {
 				s.fail(w, e, "import")
 				return
@@ -421,7 +425,7 @@ func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {
 		e.ImageID = &im.ID
 		e.Title = im.Title
 	}
-	openURL := ""
+	openURL, stackErr, stacked := "", "", false
 	switch e.Destination {
 	case "download":
 	case "photos", "files":
@@ -448,6 +452,14 @@ func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			e.Target, openURL = id, c.public
+			// next to its original: an Immich stack with the edit on top
+			if st, _ := s.store.GetSettings(ctx, uid); st.StackPhotos && im != nil && im.Source == "photos" && validAssetID(im.SourceRef) && validAssetID(id) && id != im.SourceRef {
+				if err := c.client.Stack(ctx, []string{id, im.SourceRef}); err != nil {
+					stackErr = err.Error()
+				} else {
+					stacked = true
+				}
+			}
 		} else {
 			c, err := s.conn(ctx, appFiles, scopeFilesWrite)
 			if err != nil {
@@ -486,7 +498,7 @@ func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {
 		subject = fmt.Sprintf("image:%d", im.ID)
 	}
 	s.publish(ctx, uid, "photolab.image_exported", subject, payload)
-	writeJSON(w, http.StatusOK, map[string]any{"export": e, "open_url": openURL})
+	writeJSON(w, http.StatusOK, map[string]any{"export": e, "open_url": openURL, "stacked": stacked, "stack_error": stackErr})
 }
 
 func (s *Server) handleListExports(w http.ResponseWriter, r *http.Request) {

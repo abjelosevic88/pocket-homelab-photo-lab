@@ -50,6 +50,8 @@ type Image struct {
 	CreatedAt    string          `json:"created_at"`
 	UpdatedAt    string          `json:"updated_at"`
 	Versions     int             `json:"versions"`
+	Camera       string          `json:"camera"`
+	Stale        bool            `json:"stale"` // the look is behind the edit
 }
 
 // Version is a saved state of an edit.
@@ -109,6 +111,10 @@ type Settings struct {
 	ExportName    string  `json:"export_name"`     // {title} {date} {n} {w} {h}
 	SaveTo        string  `json:"save_to"`         // download | photos | files
 	FilesFolder   string  `json:"files_folder"`    // in Pocket Files, "My files"
+
+	KeepDate    bool `json:"keep_date"`    // the date taken goes into saved JPEGs
+	KeepCamera  bool `json:"keep_camera"`  // and the camera's make and model
+	StackPhotos bool `json:"stack_photos"` // a copy saved to Pocket Photos is stacked on its original
 
 	// The editor.
 	PreviewSize  int    `json:"preview_size"`  // the long edge the editor works on, 1200–4096
