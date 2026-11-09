@@ -46,19 +46,22 @@
 
 ## What it does
 
-- **Bring pictures in**: upload (JPEG, PNG, WebP, GIF, AVIF, BMP, TIFF; HEIC in Safari), drop them anywhere, paste a screenshot, share from a phone to the installed app, pick from your Pocket Photos library (search by description) or from Pocket Files folders. Pocket Photos' “Edit in Photo Lab” opens a photo here directly.
-- **Crop and turn**: free or fixed shapes (square, 4:5, 3:2, 16:9, 9:16 …), turn left and right, mirror, flip, straighten with automatic fill.
+- **Bring pictures in**: upload (JPEG, PNG, WebP, GIF, AVIF, BMP, TIFF, HEIC in every browser, and camera RAW files through the full-size JPEG the camera puts inside them), drop them anywhere, paste a screenshot, share from a phone to the installed app, pick from your Pocket Photos library (search by description) or from Pocket Files folders. Pocket Photos' “Edit in Photo Lab” opens a photo here directly.
+- **Crop and turn**: free or fixed shapes (square, 4:5, 3:2, 16:9, 9:16 …), turn left and right, mirror, flip, straighten with automatic fill, and perspective correction for leaning buildings and photographed pages.
 - **Light and colour**: exposure, brightness, contrast, highlights, shadows, whites, blacks, warmth, tint, vibrance, saturation, hue, clarity, dehaze, sharpening, noise reduction, vignette, grain, fade and blur; **Auto** levels and white balance; a live histogram.
+- **Local adjustments**: a gradient, a circle or a brush, each with its own light and colour sliders: darken just the sky, brighten just a face.
+- **Heal and clone**: tap a spot, a speck of dust or a power line and it is painted over from a nearby patch, colour-matched.
+- **Remove the background**: a small model (U²-Net) finds the subject right in the browser; fix the edges with a brush; put a colour, a blur or nothing behind it.
 - **Colour**: tone curves (all, red, green, blue), a colour mixer for eight colours (hue, saturation, lightness) and split toning.
 - **Looks**: twenty ready-made looks shown on your own picture, at any strength; save your own looks and put them on many pictures at once.
 - **Effects**: black and white, sepia, duotone, negative, posterize, pixelate, miniature (tilt-shift), and making a colour see-through (a logo or a signature on white paper).
-- **Text and drawing**: captions in six typefaces with colour, outline, a box behind, shadow, turn and opacity; stickers; a corner or all-over watermark; pen, marker, boxes, circles, lines and arrows.
+- **Text and drawing**: captions in six typefaces (or fonts of your own) with colour, outline, a box behind, shadow, turn and opacity; stickers; a logo or a second picture on top; a corner or all-over watermark; pen, marker, boxes, circles, lines and arrows.
 - **Hide**: blur, pixelate or black out faces, number plates, addresses and screens; nothing underneath survives in the saved picture.
 - **Frame and size**: borders, rounded corners, fitting the whole picture into a square or a story with a blurred background; resize by pixels, percent or common sizes.
-- **Save a copy**: JPEG, PNG, WebP or AVIF, at a quality and size you choose, to this device, as a new photo in Pocket Photos or into a Pocket Files folder. No location or camera details leave with it.
+- **Save a copy**: JPEG, PNG, WebP or AVIF, at a quality and size you choose, to this device, as a new photo in Pocket Photos (stacked on its original), into a Pocket Files folder, as a draft post in Pocket Blog, a message in Pocket Chat, a new note in Pocket Notes or a document in Pocket Documents. The date taken (and, if you like, the camera) goes with it; the location never does.
 - **Never lose anything**: undo and redo for every step, saving as you go, named versions, copies to try something else, hold to compare with the original or a before/after line.
 - **Many at once**: select pictures, put one look and size on all of them, download them as a ZIP or send them to Photos or Files; collages of two to nine pictures.
-- **AI, if you want it**: Pocket AI (or your OpenAI key) suggests an edit for a picture or describes it (a name and alt text).
+- **AI, if you want it**: Pocket AI (or your OpenAI key) suggests an edit for a picture or describes it (a name and alt text); in Pocket AI's chat, "put the Film look on my last five photos" or "make these square" works too (Core's `pocket_photolab_*` tools).
 - **Everyone their own**: each person has their own pictures, looks, settings and connections; admins see no one else's.
 
 All the editing happens in your browser (a Web Worker does the pixels), so the server stays small; it keeps the originals, the edits and a rendered preview of each look.
@@ -85,4 +88,4 @@ make test    # go vet, go test, tsc
 make         # web + binary
 ```
 
-MIT licensed.
+MIT licensed; the background model, ONNX Runtime and libheif keep their own licences ([THIRD_PARTY.md](THIRD_PARTY.md)).

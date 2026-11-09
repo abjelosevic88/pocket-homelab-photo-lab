@@ -1,6 +1,7 @@
 // Talking to the server about pictures: addresses, uploads, saving results.
 import { api, ApiError, V1 } from './api'
 import type { Image, ImportResult, Export, SaveTo } from './types'
+import { decodeBlob } from './render/engine'
 
 export const thumbURL = (im: Pick<Image, 'id' | 'updated_at'>) => `${V1}/images/${im.id}/thumb?v=${encodeURIComponent(im.updated_at)}`
 export const originalURL = (im: Pick<Image, 'id' | 'sha256'>) => `${V1}/images/${im.id}/original?v=${im.sha256.slice(0, 12) || '1'}`
@@ -19,7 +20,7 @@ const SERVER_READS = /^image\/(jpeg|png|gif|webp|bmp|tiff)$/
 
 async function browserThumb(file: File): Promise<string | null> {
   try {
-    const bmp = await createImageBitmap(file, { imageOrientation: 'from-image' })
+    const bmp = await decodeBlob(file)
     const k = Math.min(1, 512 / Math.max(bmp.width, bmp.height))
     const c = document.createElement('canvas')
     c.width = Math.max(1, Math.round(bmp.width * k)); c.height = Math.max(1, Math.round(bmp.height * k))

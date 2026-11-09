@@ -5,27 +5,28 @@ import { api, V1 } from '../lib/api'
 import { useApp } from '../lib/app-context'
 import type { Image } from '../lib/types'
 import { clean, isEdited, type Layer, type Recipe } from '../lib/recipe'
-import { cropSize, dataURL, encode, finish, loadBitmap, render, renderBase, type Canvas } from '../lib/render/engine'
+import { cropSize, dataURL, encode, finish, loadBitmap, prepareLayers, render, renderBase, type Canvas } from '../lib/render/engine'
 import { originalURL, saveLook } from '../lib/images'
 import { Icon } from '../components/icons'
 import { AskButton } from '../components/AskButton'
 import { announceChange } from '../components/Layout'
 import { ExportDialog } from '../components/ExportDialog'
 import { Stage } from '../components/editor/Stage'
-import { AdjustPanel, ColorPanel, CropPanel, DrawPanel, EffectsPanel, FramePanel, HidePanel, InfoPanel, LooksPanel, ResizePanel, TextPanel } from '../components/editor/Panels'
-import type { Brush, DrawMode, Ed, RedactOpts, Tool } from '../components/editor/types'
+import { AdjustPanel, ColorPanel, CropPanel, CutoutPanel, DrawPanel, EffectsPanel, FramePanel, HealPanel, HidePanel, InfoPanel, LocalPanel, LooksPanel, ResizePanel, TextPanel } from '../components/editor/Panels'
+import type { Brush, DrawMode, Ed, PaintOpts, RedactOpts, Tool } from '../components/editor/types'
+import { loadFonts } from '../lib/fonts'
 import { Confirm, Loading, MenuButton, type MenuItem, modalOpen, useIsMobile, useToast, errMsg } from '../components/ui'
 
 const TOOLS: { id: Tool; label: string; icon: string; key?: string }[] = [
-  { id: 'crop', label: 'Crop', icon: 'crop', key: 'c' }, { id: 'adjust', label: 'Adjust', icon: 'sliders', key: 'a' }, { id: 'color', label: 'Colour', icon: 'palette' },
-  { id: 'looks', label: 'Looks', icon: 'wand', key: 'l' }, { id: 'effects', label: 'Effects', icon: 'sparkles' }, { id: 'text', label: 'Text', icon: 'type', key: 't' },
+  { id: 'crop', label: 'Crop', icon: 'crop', key: 'c' }, { id: 'adjust', label: 'Adjust', icon: 'sliders', key: 'a' }, { id: 'local', label: 'Local', icon: 'focus', key: 'm' }, { id: 'color', label: 'Colour', icon: 'palette' },
+  { id: 'looks', label: 'Looks', icon: 'wand', key: 'l' }, { id: 'effects', label: 'Effects', icon: 'sparkles' }, { id: 'heal', label: 'Heal', icon: 'eraser', key: 'j' }, { id: 'cutout', label: 'Background', icon: 'image', key: 'b' }, { id: 'text', label: 'Text', icon: 'type', key: 't' },
   { id: 'draw', label: 'Draw', icon: 'brush', key: 'd' }, { id: 'hide', label: 'Hide', icon: 'eye-slash', key: 'h' }, { id: 'frame', label: 'Frame', icon: 'frame', key: 'f' },
   { id: 'resize', label: 'Size', icon: 'resize', key: 's' }, { id: 'info', label: 'Info', icon: 'info', key: 'i' },
 ]
-const TOOL_HELP: Partial<Record<Tool, string>> = { crop: 'Crop and turn', adjust: 'Light and colour', color: 'Curves, colour mixer, split toning', looks: 'Looks (filters)', effects: 'Effects', text: 'Text, stickers, watermark', draw: 'Draw and shapes', hide: 'Hide faces and plates', frame: 'Frame and background', resize: 'Size', info: 'Details and versions' }
+const TOOL_HELP: Partial<Record<Tool, string>> = { local: 'Local adjustments', heal: 'Heal and clone spots', cutout: 'Remove the background', crop: 'Crop and turn', adjust: 'Light and colour', color: 'Curves, colour mixer, split toning', looks: 'Looks (filters)', effects: 'Effects', text: 'Text, stickers, watermark', draw: 'Draw and shapes', hide: 'Hide faces and plates', frame: 'Frame and background', resize: 'Size', info: 'Details and versions' }
 
 const same = (a: Recipe, b: Recipe) => JSON.stringify(clean(a)) === JSON.stringify(clean(b))
-const noPixelsPart = (r: Recipe): Recipe => ({ rotate: r.rotate, flipH: r.flipH, flipV: r.flipV, straighten: r.straighten, crop: r.crop, resize: r.resize })
+const noPixelsPart = (r: Recipe): Recipe => ({ rotate: r.rotate, flipH: r.flipH, flipV: r.flipV, straighten: r.straighten, perspective: r.perspective, crop: r.crop, resize: r.resize })
 
 export default function Editor() {
   const { id } = useParams()
@@ -49,6 +50,7 @@ export default function Editor() {
   const [drawMode, setDrawMode] = useState<DrawMode>('brush')
   const [brush, setBrush] = useState<Brush>({ color: '#f03e3e', width: 6, opacity: 1, fill: null })
   const [redact, setRedact] = useState<RedactOpts>({ mode: 'blur', strength: 60, round: false })
+  const [paint, setPaint] = useState<PaintOpts>({ size: 0.06, erase: false, show: true, heal: 'heal', keep: true })
   const [comparing, setComparing] = useState(false)
   const [split, setSplit] = useState(false)
   const [exporting, setExporting] = useState(false)
@@ -91,11 +93,12 @@ export default function Editor() {
         const crop = toolRef.current === 'crop'
         const maxEdge = draft.current ? Math.min(1000, previewSize) : previewSize
         const layers = (r.layers || []).filter(l => l.type === 'redact' && !(draft.current && toolRef.current === 'hide'))
-        const baseRecipe: Recipe = { ...r, layers: crop ? [] : layers }
-        const key = JSON.stringify([crop, maxEdge, crop ? null : r.crop, r.rotate, r.flipH, r.flipV, r.straighten, crop ? null : r.resize, r.adjust, r.curves, r.hsl, r.split, r.look, r.effects, baseRecipe.layers])
+        const baseRecipe: Recipe = { ...r, layers: crop ? [] : layers, masks: crop ? [] : r.masks, heals: crop ? [] : r.heals }
+        const key = JSON.stringify([crop, maxEdge, crop ? null : r.crop, r.rotate, r.flipH, r.flipV, r.straighten, r.perspective, crop ? null : r.resize, r.adjust, r.curves, r.hsl, r.split, r.look, r.effects, baseRecipe.layers, baseRecipe.masks, baseRecipe.heals, r.cutout])
         let base = baseCache.current?.key === key ? baseCache.current.canvas : null
         if (!base) { base = await renderBase(src, src.width, src.height, baseRecipe, { maxEdge, uncropped: crop }); baseCache.current = { key, canvas: base } }
         if (my !== req.current) continue
+        await prepareLayers(rec.current)
         const out = crop ? base : finish(base, rec.current, { transparent: true })
         setView({ canvas: out, version: ++ver.current, base: { w: base.width, h: base.height } })
         if (my === req.current) break
@@ -103,7 +106,7 @@ export default function Editor() {
     } catch (e) { toast(errMsg(e), 'err') } finally { busy.current = false }
   }, [src, previewSize, toast])
   const schedule = useCallback(() => { req.current++; requestAnimationFrame(() => { runRender() }) }, [runRender])
-  useEffect(() => { if (src) schedule() }, [src, schedule])
+  useEffect(() => { if (src) loadFonts().finally(() => { req.current++; runRender() }) }, [src, runRender])
 
   // the original, for comparing (same crop and size)
   const [before, setBefore] = useState<Canvas | null>(null)
@@ -184,12 +187,12 @@ export default function Editor() {
   const setTool = useCallback((t: Tool) => { toolRef.current = t; setToolState(t); setSelected(null); schedule() }, [schedule])
 
   const ed: Ed | null = useMemo(() => image && src ? {
-    image, src, recipe, set, commit, setDraft, tool, setTool, selected, select: setSelected, drawMode, setDrawMode, brush, setBrush, redact, setRedact,
+    image, src, recipe, set, commit, setDraft, tool, setTool, selected, select: setSelected, drawMode, setDrawMode, brush, setBrush, redact, setRedact, paint, setPaint,
     base: view.base, view: () => view.canvas,
     updateLayer: (lid: string, patch: Partial<Layer>, c = true) => { const r = { ...rec.current, layers: (rec.current.layers || []).map(l => l.id === lid ? { ...l, ...patch } as Layer : l) }; if (c) commit(r); else set(r) },
     addLayer: (l: Layer) => { commit({ ...rec.current, layers: [...(rec.current.layers || []), l] }); setSelected(l.id) },
     removeLayer: (lid: string) => { commit({ ...rec.current, layers: (rec.current.layers || []).filter(l => l.id !== lid) }); setSelected(null) },
-  } : null, [image, src, recipe, set, commit, setDraft, tool, setTool, selected, drawMode, brush, redact, view])
+  } : null, [image, src, recipe, set, commit, setDraft, tool, setTool, selected, drawMode, brush, redact, paint, view])
 
   const saveVersion = async (name: string) => {
     if (!image) return
@@ -216,7 +219,25 @@ export default function Editor() {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 's') { e.preventDefault(); setExporting(true); return }
       if (e.metaKey || e.ctrlKey || e.altKey || typing || modalOpen() || document.querySelector('.menu, .popover, .sel-pop')) return
       if (e.key === '\\') { e.preventDefault(); setComparing(true); return }
-      if ((e.key === 'Delete' || e.key === 'Backspace') && selected) { e.preventDefault(); ed?.removeLayer(selected); return }
+      if ((e.key === 'Delete' || e.key === 'Backspace') && selected && ed) {
+        e.preventDefault()
+        const r = rec.current
+        if ((r.masks || []).some(m => m.id === selected)) ed.commit({ ...r, masks: r.masks!.filter(m => m.id !== selected) })
+        else if ((r.heals || []).some(h => h.id === selected)) ed.commit({ ...r, heals: r.heals!.filter(h => h.id !== selected) })
+        else ed.removeLayer(selected)
+        setSelected(null)
+        return
+      }
+      if (selected && ed && e.key.startsWith('Arrow') && (rec.current.layers || []).some(l => l.id === selected)) {
+        // nudge the selected text, shape or picture: 1 px of the view (10 with shift)
+        e.preventDefault()
+        const k = (e.shiftKey ? 10 : 1) / Math.max(1, Math.min(view.base.w, view.base.h))
+        const dx = e.key === 'ArrowLeft' ? -k : e.key === 'ArrowRight' ? k : 0, dy = e.key === 'ArrowUp' ? -k : e.key === 'ArrowDown' ? k : 0
+        const l = rec.current.layers!.find(x => x.id === selected)!
+        const moved = 'x1' in l ? { ...l, x1: l.x1 + dx, y1: l.y1 + dy, x2: l.x2 + dx, y2: l.y2 + dy } : 'points' in l ? { ...l, points: l.points.map(([x, y]) => [x + dx, y + dy] as [number, number]) } : 'x' in l ? { ...l, x: l.x + dx, y: l.y + dy } : l
+        ed.updateLayer(selected, moved as Layer, true)
+        return
+      }
       if (e.key === 'Escape') { if (selected) setSelected(null); else if (toolRef.current === 'crop') setTool('adjust'); else leave(); return }
       if (e.key === '0') { window.dispatchEvent(new CustomEvent('plab:zoom', { detail: 'fit' })); return }
       if (e.key === '+' || e.key === '=') { window.dispatchEvent(new CustomEvent('plab:zoom', { detail: 'in' })); return }
@@ -248,6 +269,9 @@ export default function Editor() {
     switch (tool) {
       case 'crop': return <CropPanel ed={ed} />
       case 'adjust': return <AdjustPanel ed={ed} histo={{ canvas: view.canvas, version: view.version }} />
+      case 'local': return <LocalPanel ed={ed} />
+      case 'heal': return <HealPanel ed={ed} />
+      case 'cutout': return <CutoutPanel ed={ed} />
       case 'color': return <ColorPanel ed={ed} />
       case 'looks': return <LooksPanel ed={ed} />
       case 'effects': return <EffectsPanel ed={ed} />

@@ -378,3 +378,53 @@ func TestApplyChangesTheEdit(t *testing.T) {
 	a.expect(400, a.alice, "POST", "/api/v1/images/apply", map[string]any{"ids": []int64{id}, "adjust": map[string]any{"wobble": 3}})
 	a.expect(404, a.bob, "POST", "/api/v1/images/apply", map[string]any{"ids": []int64{id}, "look": "film"})
 }
+
+// A RAW file: the lab keeps the camera's full-size JPEG from inside it.
+func TestRawUsesTheCamerasJPEG(t *testing.T) {
+	a := newApp(t, nil)
+	var small, big bytes.Buffer
+	_ = jpeg.Encode(&small, image.NewRGBA(image.Rect(0, 0, 160, 120)), nil)
+	_ = jpeg.Encode(&big, image.NewRGBA(image.Rect(0, 0, 900, 600)), nil)
+	raw := append([]byte("II*\x00\x08\x00\x00\x00\x00\x00junk-sensor-data"), small.Bytes()...)
+	raw = append(append(raw, []byte("more sensor data")...), big.Bytes()...)
+	raw = append(raw, []byte("trailing")...)
+	code, m := a.upload(a.alice, "DSC0042.ARW", raw)
+	if code != http.StatusCreated {
+		t.Fatalf("raw upload → %d %v", code, m)
+	}
+	im := m["items"].([]any)[0].(map[string]any)
+	if im["mime"] != "image/jpeg" || num(im, "width") != 900 || num(im, "height") != 600 || im["source_name"] != "DSC0042.ARW" {
+		t.Fatalf("raw = %v", im)
+	}
+	if code, _ := a.upload(a.alice, "empty.NEF", []byte("II*\x00 no pictures here")); code != http.StatusBadRequest {
+		t.Fatalf("raw without a picture → %d", code)
+	}
+}
+
+func TestFontsArePersonal(t *testing.T) {
+	a := newApp(t, nil)
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+	fw, _ := mw.CreateFormFile("file", "Lobster.ttf")
+	_, _ = fw.Write(append([]byte("\x00\x01\x00\x00"), make([]byte, 200)...))
+	_ = mw.Close()
+	req, _ := http.NewRequest("POST", a.url+"/api/v1/fonts", &buf)
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+	code, b := a.do(a.alice, req)
+	var f map[string]any
+	_ = json.Unmarshal(b, &f)
+	if code != 201 || f["name"] != "Lobster" || f["mime"] != "font/ttf" {
+		t.Fatalf("font upload → %d %s", code, b)
+	}
+	p := "/api/v1/fonts/" + itoa(int64(num(f, "id")))
+	a.expect(404, a.bob, "GET", p+"/file", nil)
+	a.expect(404, a.bob, "DELETE", p, nil)
+	if _, _, l := a.call(a.bob, "GET", "/api/v1/fonts", nil); len(l) != 0 {
+		t.Fatalf("Bob sees fonts %v", l)
+	}
+	req, _ = http.NewRequest("GET", a.url+p+"/file", nil)
+	if code, _ := a.do(a.alice, req); code != 200 {
+		t.Fatalf("font file → %d", code)
+	}
+	a.expect(204, a.alice, "DELETE", p, nil)
+}

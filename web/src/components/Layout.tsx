@@ -8,6 +8,7 @@ import type { HomeData, Image, ImportResult, Sources } from '../lib/types'
 import { importSummary, originalURL, saveLook, uploadMany } from '../lib/images'
 import { encode, loadBitmap, render } from '../lib/render/engine'
 import { isEdited } from '../lib/recipe'
+import { loadFonts } from '../lib/fonts'
 import { Icon } from './icons'
 import { Sidebar } from './Sidebar'
 import { CommandPalette, type PaletteCommand } from './CommandPalette'
@@ -90,6 +91,7 @@ export default function Layout() {
     drawing.current = true
     try {
       const list = await api.get<Image[]>(`${V1}/images/stale`)
+      if (list.length) await loadFonts()
       for (const im of list) {
         try {
           const bmp = await loadBitmap(originalURL(im))

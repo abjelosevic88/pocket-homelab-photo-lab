@@ -17,7 +17,9 @@ All under `/api/v1`, JSON unless noted. Authenticate with a session cookie, `Aut
 | `POST /images/{id}/copy` | `{"fresh": true}` starts the copy from the original |
 | `GET/POST /images/{id}/versions`, `DELETE /versions/{id}`, `GET /versions/{id}/thumb` | Saved states of an edit |
 | `GET/POST /presets`, `PUT/DELETE /presets/{id}`, `GET /presets/{id}/thumb` | Looks of your own (`{name, recipe, thumb?}`) |
-| `GET /exports`, `POST /exports` | What left the lab. POST multipart `meta` (`{image_id, destination: download|photos|files, name, format, width, height, folder?}`) + `file`; `photos` adds a new photo to Pocket Photos, `files` saves into Pocket Files |
+| `GET /exports`, `POST /exports` | What left the lab. POST multipart `meta` (`{image_id, destination: download|photos|files|blog|chat|notes|documents, name, format, width, height, folder?, conversation?, title?, text?}`) + `file`; `photos` adds a new photo to Pocket Photos (stacked on its original), `files` saves into Pocket Files, `blog` starts a draft post, `chat` sends a message, `notes` makes a note, `documents` files it |
+| `POST /images/apply` | `{ids, look?, strength?, adjust?, aspect?, rotate?, straighten?, black_and_white?, frame?, long_edge?, reset?}` merges a change into each picture's edit (Pocket AI); the look is drawn again the next time a browser has the lab open (`GET /images/stale`) |
+| `GET/POST /fonts`, `GET /fonts/{id}/file`, `DELETE /fonts/{id}` | Fonts of your own (TTF, OTF, WOFF, WOFF2) for text |
 | `GET /home` | Counts, the latest pictures and exports |
 | `GET /sources`, `GET /sources/photos?q&cursor&favorites`, `GET /sources/photos/{asset}/thumb`, `GET /sources/files/spaces`, `GET /sources/files/list?space&path`, `GET /sources/files/thumb?space&path` | Browsing Pocket Photos and Pocket Files through your connection |
 | `POST /ai/suggest` `{image, wish}`, `POST /ai/describe` `{image}` | `image` is a small JPEG data URL; answers slider values, a look, a horizon and a crop, or a title, alt text and tags |
@@ -39,4 +41,4 @@ A JSON object the browser applies to the original (`web/src/lib/recipe.ts`); the
 
 ## Pocket Core links
 
-Offers `photolab:read` (the pictures, their looks and originals, looks, exports) and `photolab:write` (add a picture; change or delete only pictures it added). Uses Pocket Photos (`photos:read`, `photos:write`) and Pocket Files (`files:read`, `files:write`). Publishes `photolab.image_added`, `photolab.image_edited`, `photolab.image_exported`.
+Offers `photolab:read` (the pictures, their looks and originals, looks, exports) and `photolab:write` (add a picture; change or delete only pictures it added). Uses Pocket Photos (`photos:read`, `photos:write`), Pocket Files (`files:read`, `files:write`), Pocket Blog (`blog:write`), Pocket Chat (`chat:read`, `chat:write`), Pocket Notes (`notes:write`) and Pocket Documents (`documents:write`). Publishes `photolab.image_added`, `photolab.image_edited`, `photolab.image_exported`.

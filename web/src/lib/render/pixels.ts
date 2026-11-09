@@ -3,7 +3,7 @@
 // directly for small thumbnails. Every radius is a fraction of the picture,
 // so a small preview and the full-size export look the same.
 
-import { BAND_HUE, BANDS, effective, curvesOn, hslOn, type Pt, type Recipe, type RedactLayer } from '../recipe'
+import { BAND_HUE, BANDS, effective, curvesOn, hslOn, isZeroAdjust, type BrushStroke, type Heal, type Mask, type Pt, type Recipe, type RedactLayer } from '../recipe'
 
 const clamp = (v: number, lo = 0, hi = 1) => (v < lo ? lo : v > hi ? hi : v)
 const smooth = (a: number, b: number, x: number) => { const t = clamp((x - a) / (b - a)); return t * t * (3 - 2 * t) }
@@ -368,7 +368,23 @@ export function process(px: Uint8ClampedArray, w: number, h: number, r: Recipe):
     }
   }
 
-  // 8. hidden areas
+  // 8. local adjustments: the same steps on a copy, kept where the mask is
+  for (const m of r.masks || []) {
+    if (m.hidden || isZeroAdjust(m.adjust)) continue
+    const plane = maskPlane(m, w, h)
+    const tmp = px.slice()
+    process(tmp, w, h, { adjust: m.adjust })
+    for (let i = 0, j = 0; i < n; i++, j += 4) {
+      const k = plane[i]
+      if (k <= 0) continue
+      px[j] += (tmp[j] - px[j]) * k; px[j + 1] += (tmp[j + 1] - px[j + 1]) * k; px[j + 2] += (tmp[j + 2] - px[j + 2]) * k
+    }
+  }
+
+  // 9. healed and cloned spots
+  if (r.heals?.length) heal(px, w, h, r.heals)
+
+  // 10. hidden areas
   for (const l of (r.layers || []) as RedactLayer[]) {
     if (l.type !== 'redact' || l.hidden) continue
     const x0 = Math.max(0, Math.floor(l.x * w)), y0 = Math.max(0, Math.floor(l.y * h))
@@ -434,4 +450,105 @@ export function autoAdjust(px: Uint8ClampedArray): { exposure: number; whites: n
     blacks: round(-lo / 255 * 100 / 0.12 * 0.6, 40), whites: round((255 - hi) / 255 * 100 / 0.15 * 0.6, 40),
     exposure: round((0.46 - mid / 255) * 90, 45), temperature, tint, vibrance: 12, contrast: 6,
   }
+}
+
+/** Where a local adjustment acts, 0…1 per pixel. */
+export function maskPlane(m: Mask, w: number, h: number): Float32Array {
+  const out = new Float32Array(w * h)
+  const U = Math.min(w, h)
+  if (m.kind === 'linear') {
+    const x1 = m.x1 * w, y1 = m.y1 * h, dx = m.x2 * w - x1, dy = m.y2 * h - y1
+    const len2 = Math.max(1, dx * dx + dy * dy)
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+      const t = ((x - x1) * dx + (y - y1) * dy) / len2
+      out[y * w + x] = 1 - smooth(0, 1, t)
+    }
+  } else if (m.kind === 'radial') {
+    const cx = m.x * w, cy = m.y * h, rx = Math.max(1, m.rx * w), ry = Math.max(1, m.ry * h)
+    const f = Math.max(0.02, Math.min(1, (m.feather ?? 50) / 100))
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+      const d = Math.sqrt(((x - cx) / rx) ** 2 + ((y - cy) / ry) ** 2)
+      out[y * w + x] = 1 - smooth(1 - f, 1, d)
+    }
+  } else {
+    const f = Math.max(0.02, Math.min(1, (m.feather ?? 50) / 100))
+    for (const st of m.strokes) paintStroke(out, w, h, st, U, f)
+  }
+  if (m.invert) for (let i = 0; i < out.length; i++) out[i] = 1 - out[i]
+  return out
+}
+
+/** Paints (or with erase, takes away) a soft round brush along a stroke. */
+export function paintStroke(out: Float32Array, w: number, h: number, st: BrushStroke, U: number, feather: number) {
+  const r = Math.max(1, (st.size * U) / 2)
+  const pts = st.points.map(([x, y]) => [x * w, y * h])
+  if (pts.length === 1) pts.push([pts[0][0] + 0.01, pts[0][1]])
+  for (let i = 0; i < pts.length - 1; i++) {
+    const [ax, ay] = pts[i], [bx, by] = pts[i + 1]
+    const x0 = Math.max(0, Math.floor(Math.min(ax, bx) - r)), x1 = Math.min(w - 1, Math.ceil(Math.max(ax, bx) + r))
+    const y0 = Math.max(0, Math.floor(Math.min(ay, by) - r)), y1 = Math.min(h - 1, Math.ceil(Math.max(ay, by) + r))
+    const dx = bx - ax, dy = by - ay, l2 = dx * dx + dy * dy || 1
+    for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
+      const t = Math.max(0, Math.min(1, ((x - ax) * dx + (y - ay) * dy) / l2))
+      const d = Math.hypot(x - (ax + t * dx), y - (ay + t * dy)) / r
+      if (d >= 1) continue
+      const v = 1 - smooth(1 - feather, 1, d)
+      const k = y * w + x
+      out[k] = st.erase ? Math.min(out[k], 1 - v) : Math.max(out[k], v)
+    }
+  }
+}
+
+function ringMean(px: Uint8ClampedArray, w: number, h: number, cx: number, cy: number, r0: number, r1: number): [number, number, number] {
+  let R = 0, G = 0, B = 0, n = 0
+  const x0 = Math.max(0, Math.floor(cx - r1)), x1 = Math.min(w - 1, Math.ceil(cx + r1)), y0 = Math.max(0, Math.floor(cy - r1)), y1 = Math.min(h - 1, Math.ceil(cy + r1))
+  const step = Math.max(1, Math.floor((r1 - r0) / 3))
+  for (let y = y0; y <= y1; y += step) for (let x = x0; x <= x1; x += step) {
+    const d = Math.hypot(x - cx, y - cy)
+    if (d < r0 || d > r1) continue
+    const j = (y * w + x) * 4
+    R += px[j]; G += px[j + 1]; B += px[j + 2]; n++
+  }
+  return n ? [R / n, G / n, B / n] : [0, 0, 0]
+}
+
+/** Paints each spot from its source; "heal" also matches the colour around it. */
+export function heal(px: Uint8ClampedArray, w: number, h: number, spots: Heal[]) {
+  const U = Math.min(w, h)
+  for (const s of spots) {
+    const r = Math.max(1.5, s.r * U)
+    const cx = s.x * w, cy = s.y * h, sx = s.sx * w, sy = s.sy * h
+    let dR = 0, dG = 0, dB = 0
+    if (s.mode === 'heal') {
+      const t = ringMean(px, w, h, cx, cy, r, r * 1.35), o = ringMean(px, w, h, sx, sy, r, r * 1.35)
+      dR = t[0] - o[0]; dG = t[1] - o[1]; dB = t[2] - o[2]
+    }
+    const src = px.slice()
+    const x0 = Math.max(0, Math.floor(cx - r)), x1 = Math.min(w - 1, Math.ceil(cx + r)), y0 = Math.max(0, Math.floor(cy - r)), y1 = Math.min(h - 1, Math.ceil(cy + r))
+    for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
+      const d = Math.hypot(x - cx, y - cy) / r
+      if (d >= 1) continue
+      const a = 1 - smooth(s.mode === 'heal' ? 0.45 : 0.75, 1, d)
+      const fx = Math.round(x - cx + sx), fy = Math.round(y - cy + sy)
+      if (fx < 0 || fy < 0 || fx >= w || fy >= h) continue
+      const j = (y * w + x) * 4, k = (fy * w + fx) * 4
+      px[j] += (src[k] + dR - px[j]) * a; px[j + 1] += (src[k + 1] + dG - px[j + 1]) * a; px[j + 2] += (src[k + 2] + dB - px[j + 2]) * a
+    }
+  }
+}
+
+/** Picks where to heal a spot from: the nearby patch whose surroundings look most like the spot's. */
+export function bestSource(px: Uint8ClampedArray, w: number, h: number, x: number, y: number, r: number): [number, number] {
+  const U = Math.min(w, h), rr = Math.max(2, r * U), cx = x * w, cy = y * h
+  const target = ringMean(px, w, h, cx, cy, rr, rr * 1.4)
+  let best: [number, number] = [x + (2.2 * rr) / w, y], bestD = Infinity
+  for (let k = 0; k < 16; k++) {
+    const ang = (k / 16) * Math.PI * 2, dist = rr * (k % 2 ? 2.2 : 3.2)
+    const sx = cx + Math.cos(ang) * dist, sy = cy + Math.sin(ang) * dist
+    if (sx - rr < 0 || sy - rr < 0 || sx + rr >= w || sy + rr >= h) continue
+    const m = ringMean(px, w, h, sx, sy, 0, rr * 1.4)
+    const d = (m[0] - target[0]) ** 2 + (m[1] - target[1]) ** 2 + (m[2] - target[2]) ** 2
+    if (d < bestD) { bestD = d; best = [sx / w, sy / h] }
+  }
+  return best
 }

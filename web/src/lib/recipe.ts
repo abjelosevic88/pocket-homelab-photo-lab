@@ -36,7 +36,24 @@ export interface DrawLayer extends LayerBase { type: 'draw'; points: Pt[]; strok
 export interface StickerLayer extends LayerBase { type: 'sticker'; x: number; y: number; emoji: string; size: number; rotate?: number }
 export interface RedactLayer extends LayerBase { type: 'redact'; x: number; y: number; w: number; h: number; mode: 'blur' | 'pixelate' | 'black'; strength: number; round?: boolean }
 export interface WatermarkLayer extends LayerBase { type: 'watermark'; text: string; size: number; color: string; tile: boolean; corner: 'br' | 'bl' | 'tr' | 'tl' | 'c' }
-export type Layer = TextLayer | ShapeLayer | LineLayer | DrawLayer | StickerLayer | RedactLayer | WatermarkLayer
+export interface ImageLayer extends LayerBase { type: 'image'; x: number; y: number; w: number; aspect: number; src: number; rotate?: number; updated?: string }
+
+// A local adjustment: sliders that act only where the mask is.
+interface MaskBase { id: string; name?: string; adjust: Partial<Adjust>; invert?: boolean; hidden?: boolean }
+export interface LinearMask extends MaskBase { kind: 'linear'; x1: number; y1: number; x2: number; y2: number }
+export interface RadialMask extends MaskBase { kind: 'radial'; x: number; y: number; rx: number; ry: number; feather: number }
+export interface BrushStroke { points: Pt[]; size: number; erase?: boolean }
+export interface BrushMask extends MaskBase { kind: 'brush'; strokes: BrushStroke[]; feather: number }
+export type Mask = LinearMask | RadialMask | BrushMask
+
+// A spot healed or cloned: the area at (x, y) is painted from (sx, sy).
+export interface Heal { id: string; x: number; y: number; sx: number; sy: number; r: number; mode: 'heal' | 'clone' }
+
+// The background taken away: a mask the model made (in the original's own
+// pixels, so it follows crops and turns), fixed by hand, with what goes behind.
+export interface Cutout { mask: string; keep?: BrushStroke[]; remove?: BrushStroke[]; bg: string | null; feather?: number }
+
+export type Layer = ImageLayer | TextLayer | ShapeLayer | LineLayer | DrawLayer | StickerLayer | RedactLayer | WatermarkLayer
 
 export interface Recipe {
   v?: 1
@@ -44,6 +61,7 @@ export interface Recipe {
   flipH?: boolean
   flipV?: boolean
   straighten?: number // degrees, -45…45
+  perspective?: { v: number; h: number } | null // keystone, -100…100: buildings upright, a document square
   crop?: Crop | null
   resize?: { w: number; h: number } | null // the finished picture's size, before the frame
   adjust?: Partial<Adjust>
@@ -53,6 +71,9 @@ export interface Recipe {
   look?: { name: string; strength: number } | null
   effects?: Effects | null
   layers?: Layer[]
+  masks?: Mask[]
+  heals?: Heal[]
+  cutout?: Cutout | null
   frame?: Frame | null
 }
 
@@ -150,18 +171,19 @@ const straightCurve = (c?: Pt[]) => !c || c.length < 2 || c.every(([x, y]) => x 
 export const curvesOn = (c?: Partial<Curves> | null) => !!c && !(straightCurve(c.rgb) && straightCurve(c.r) && straightCurve(c.g) && straightCurve(c.b))
 export const hslOn = (h?: HSL | null) => !!h && Object.values(h).some(b => b && (b.h || b.s || b.l))
 export const splitOn = (s?: Split | null) => !!s && (s.ss > 0 || s.hs > 0)
+export const perspectiveOn = (p?: { v: number; h: number } | null) => !!p && (!!p.v || !!p.h)
 export const effectsOn = (e?: Effects | null) => !!e && !!(e.mono || e.sepia || e.invert || e.posterize || e.pixelate || e.duotone || e.tilt || e.key)
 
 /** Whether the pixels themselves change (else the pixel step is skipped). */
 export function pixelsChange(r: Recipe): boolean {
-  return !isZeroAdjust(r.adjust) || curvesOn(r.curves) || hslOn(r.hsl) || splitOn(r.split) || effectsOn(r.effects) || !!(r.look && r.look.strength > 0) || (r.layers || []).some(l => l.type === 'redact' && !l.hidden)
+  return !isZeroAdjust(r.adjust) || (r.masks || []).some(m => !m.hidden && !isZeroAdjust(m.adjust)) || (r.heals || []).length > 0 || curvesOn(r.curves) || hslOn(r.hsl) || splitOn(r.split) || effectsOn(r.effects) || !!(r.look && r.look.strength > 0) || (r.layers || []).some(l => l.type === 'redact' && !l.hidden)
 }
 
 /** Whether the edit changes anything at all. */
 export function isEdited(r: Recipe): boolean {
   const c = r.crop
-  return pixelsChange(r) || !!(r.rotate && r.rotate % 360) || !!r.flipH || !!r.flipV || !!r.straighten || !!(c && (c.x > 0.0005 || c.y > 0.0005 || c.w < 0.9995 || c.h < 0.9995)) ||
-    !!r.resize || (r.layers || []).length > 0 || !!(r.frame && (r.frame.width > 0 || r.frame.fit !== 'none' || r.frame.radius > 0))
+  return pixelsChange(r) || !!(r.rotate && r.rotate % 360) || !!r.flipH || !!r.flipV || !!r.straighten || perspectiveOn(r.perspective) || !!(c && (c.x > 0.0005 || c.y > 0.0005 || c.w < 0.9995 || c.h < 0.9995)) ||
+    !!r.resize || (r.layers || []).length > 0 || !!r.cutout || !!(r.frame && (r.frame.width > 0 || r.frame.fit !== 'none' || r.frame.radius > 0))
 }
 
 /** Drops empty parts so the stored JSON stays small. */
@@ -171,6 +193,7 @@ export function clean(r: Recipe): Recipe {
   if (r.flipH) out.flipH = true
   if (r.flipV) out.flipV = true
   if (r.straighten) out.straighten = Math.round(r.straighten * 10) / 10
+  if (perspectiveOn(r.perspective)) out.perspective = r.perspective
   if (r.crop && (r.crop.x > 0.0005 || r.crop.y > 0.0005 || r.crop.w < 0.9995 || r.crop.h < 0.9995)) out.crop = r.crop
   else if (r.crop?.aspect && r.crop.aspect !== 'free') out.crop = { x: 0, y: 0, w: 1, h: 1, aspect: r.crop.aspect }
   if (r.resize) out.resize = r.resize
@@ -181,6 +204,9 @@ export function clean(r: Recipe): Recipe {
   if (r.look && r.look.name && r.look.strength > 0) out.look = r.look
   if (effectsOn(r.effects)) out.effects = r.effects
   if (r.layers && r.layers.length) out.layers = r.layers
+  if (r.masks && r.masks.length) out.masks = r.masks
+  if (r.heals && r.heals.length) out.heals = r.heals
+  if (r.cutout) out.cutout = r.cutout
   if (r.frame && (r.frame.width > 0 || r.frame.fit !== 'none' || r.frame.radius > 0)) out.frame = r.frame
   return out
 }
@@ -203,6 +229,7 @@ export function describe(r: Recipe): string[] {
   if (r.rotate) out.push(`turned ${r.rotate}°`)
   if (r.flipH || r.flipV) out.push('mirrored')
   if (r.straighten) out.push(`straightened ${r.straighten > 0 ? '+' : ''}${r.straighten}°`)
+  if (perspectiveOn(r.perspective)) out.push('perspective corrected')
   if (r.resize) out.push(`resized to ${r.resize.w}×${r.resize.h}`)
   const n = Object.values(r.adjust || {}).filter(Boolean).length
   if (n) out.push(`${n} light and colour ${n === 1 ? 'change' : 'changes'}`)
@@ -211,6 +238,9 @@ export function describe(r: Recipe): string[] {
   if (splitOn(r.split)) out.push('split toning')
   if (r.look?.name) out.push(`${lookByName(r.look.name)?.label || r.look.name} look`)
   if (effectsOn(r.effects)) out.push('effects')
+  if (r.masks?.length) out.push(`${r.masks.length} local ${r.masks.length === 1 ? 'adjustment' : 'adjustments'}`)
+  if (r.heals?.length) out.push(`${r.heals.length} ${r.heals.length === 1 ? 'spot' : 'spots'} healed`)
+  if (r.cutout) out.push('background removed')
   const layers = r.layers || []
   const count = (t: string) => layers.filter(l => l.type === t).length
   if (count('text')) out.push(`${count('text')} text`)
@@ -218,6 +248,7 @@ export function describe(r: Recipe): string[] {
   if (count('sticker')) out.push('stickers')
   if (count('redact')) out.push(`${count('redact')} hidden ${count('redact') === 1 ? 'area' : 'areas'}`)
   if (count('watermark')) out.push('watermark')
+  if (count('image')) out.push(`${count('image')} ${count('image') === 1 ? 'picture' : 'pictures'} on top`)
   if (r.frame && (r.frame.width > 0 || r.frame.fit !== 'none' || r.frame.radius > 0)) out.push('frame')
   return out
 }
@@ -237,7 +268,7 @@ export const FONTS: { id: string; label: string; css: string }[] = [
   { id: 'hand', label: 'Handwritten', css: '"Bradley Hand", "Segoe Print", "Comic Sans MS", "Marker Felt", cursive' },
   { id: 'round', label: 'Rounded', css: '"SF Pro Rounded", "Arial Rounded MT Bold", "Varela Round", system-ui, sans-serif' },
 ]
-export const fontCSS = (id: string) => (FONTS.find(f => f.id === id) || FONTS[0]).css
+export const fontCSS = (id: string) => id?.startsWith('f:') ? `"plab-font-${id.slice(2)}", system-ui, sans-serif` : (FONTS.find(f => f.id === id) || FONTS[0]).css
 
 export const SWATCHES = ['#ffffff', '#000000', '#f03e3e', '#f76707', '#fab005', '#40c057', '#15aabf', '#4263eb', '#ae3ec9', '#e64980', '#868e96', '#ffe8cc']
 
@@ -245,3 +276,5 @@ export const STICKERS = ['❤️', '⭐', '😀', '😂', '😍', '😎', '🥳'
 
 let seq = 0
 export const newId = () => `${Date.now().toString(36)}${(seq++).toString(36)}`
+
+export const LOCAL_SLIDERS: AdjustKey[] = ['exposure', 'contrast', 'highlights', 'shadows', 'whites', 'blacks', 'temperature', 'tint', 'saturation', 'clarity', 'dehaze', 'sharpen', 'blur']

@@ -4,9 +4,12 @@ import { api, V1 } from '../../lib/api'
 import { useApp } from '../../lib/app-context'
 import type { Preset, Version } from '../../lib/types'
 import {
-  ADJUST_ZERO, ASPECTS, BAND_HUE, BANDS, FONTS, LOOKS, STICKERS, SWATCHES, SLIDER_GROUPS, applyLook, clean, describe, lookPart, newId,
-  type Adjust, type AdjustKey, type Band, type Crop, type Effects, type Frame, type Layer, type Recipe, type TextLayer, type WatermarkLayer,
+  ADJUST_ZERO, ASPECTS, BAND_HUE, BANDS, FONTS, LOCAL_SLIDERS, LOOKS, STICKERS, SWATCHES, SLIDER_GROUPS, applyLook, clean, describe, lookPart, newId,
+  type Adjust, type AdjustKey, type Band, type Crop, type Effects, type Frame, type ImageLayer, type Layer, type Mask, type Recipe, type TextLayer, type WatermarkLayer,
 } from '../../lib/recipe'
+import { loadFonts, uploadFont, type Font } from '../../lib/fonts'
+import { findSubject } from '../../lib/cutout'
+import { LabPicker } from '../Pickers'
 import { cropSize, dataURL, drawGeometry, finalSize, imageSize, makeCanvas, renderBase } from '../../lib/render/engine'
 import { autoAdjust, process } from '../../lib/render/pixels'
 import { fmtBytes, fmtDateTime } from '../../lib/format'
@@ -92,7 +95,12 @@ export function CropPanel({ ed }: { ed: Ed }) {
         </div>
         <Slider label="Straighten" value={r.straighten || 0} min={-45} max={45} step={0.1} unit="°" onDraft={ed.setDraft} onChange={v => ed.set({ ...r, straighten: v })} onCommit={() => ed.commit()} help="Turns the picture a little so the horizon is level; the edges are filled by zooming in." />
       </Group>
-      <button type="button" className="btn ghost" onClick={() => ed.commit({ ...r, crop: null, rotate: 0, flipH: false, flipV: false, straighten: 0, resize: null })}><Icon name="refresh" size={15} />Reset crop and turns</button>
+      <Group title="Perspective" icon="frame" open={!!r.perspective}>
+        <p className="muted small">Make leaning buildings stand upright, or a photographed page square.</p>
+        <Slider label="Upright (vertical)" value={r.perspective?.v || 0} min={-100} max={100} onDraft={ed.setDraft} onChange={v => ed.set({ ...r, perspective: { v, h: r.perspective?.h || 0 } })} onCommit={() => ed.commit()} help="Right: lines that lean in at the top stand straight; left: at the bottom." />
+        <Slider label="Sideways (horizontal)" value={r.perspective?.h || 0} min={-100} max={100} onDraft={ed.setDraft} onChange={h => ed.set({ ...r, perspective: { v: r.perspective?.v || 0, h } })} onCommit={() => ed.commit()} />
+      </Group>
+      <button type="button" className="btn ghost" onClick={() => ed.commit({ ...r, crop: null, rotate: 0, flipH: false, flipV: false, straighten: 0, perspective: null, resize: null })}><Icon name="refresh" size={15} />Reset crop, turns and perspective</button>
     </div>
   )
 }
@@ -299,7 +307,12 @@ export function EffectsPanel({ ed }: { ed: Ed }) {
 // ---- text, stickers, watermark ----
 
 export function TextPanel({ ed }: { ed: Ed }) {
+  const { toast } = useToast()
   const r = ed.recipe
+  const [fonts, setFonts] = useState<Font[]>([])
+  useEffect(() => { loadFonts().then(setFonts) }, [])
+  const [picking, setPicking] = useState(false)
+  const pic = (r.layers || []).find(l => l.id === ed.selected && l.type === 'image') as ImageLayer | undefined
   const texts = (r.layers || []).filter(l => l.type === 'text') as TextLayer[]
   const sel = (r.layers || []).find(l => l.id === ed.selected)
   const t = sel?.type === 'text' ? sel : null
@@ -323,7 +336,10 @@ export function TextPanel({ ed }: { ed: Ed }) {
       {texts.length > 1 && <div className="chips wrap">{texts.map(x => <button type="button" key={x.id} className={`chip ${ed.selected === x.id ? 'active' : ''}`} onClick={() => ed.select(x.id)}>{x.text.split('\n')[0].slice(0, 16) || '…'}</button>)}</div>}
       {t ? <>
         <Field label="Text"><textarea ref={area} rows={2} value={t.text} onChange={e => up({ text: e.target.value }, false)} onBlur={() => ed.commit()} /></Field>
-        <div className="font-grid">{FONTS.map(f => <button type="button" key={f.id} className={`font-btn ${t.font === f.id ? 'active' : ''}`} style={{ fontFamily: f.css }} onClick={() => up({ font: f.id })}>{f.label}</button>)}</div>
+        <div className="font-grid">{FONTS.map(f => <button type="button" key={f.id} className={`font-btn ${t.font === f.id ? 'active' : ''}`} style={{ fontFamily: f.css }} onClick={() => up({ font: f.id })}>{f.label}</button>)}
+          {fonts.map(f => <button type="button" key={f.id} className={`font-btn ${t.font === `f:${f.id}` ? 'active' : ''}`} style={{ fontFamily: `"plab-font-${f.id}", sans-serif` }} onClick={() => up({ font: `f:${f.id}` })} title={f.name}>{f.name}</button>)}
+          <label className="font-btn add" title="Add a font of your own (TTF, OTF, WOFF)"><Icon name="plus" size={13} />Font<input type="file" accept=".ttf,.otf,.woff,.woff2,font/*" hidden onChange={async e => { const f = e.target.files?.[0]; e.target.value = ''; if (!f) return; try { const nf = await uploadFont(f); setFonts(await loadFonts()); up({ font: `f:${nf.id}` }) } catch (err) { toast(errMsg(err), 'err') } }} /></label>
+        </div>
         <Slider label="Size" value={Math.round(t.size * 1000) / 10} min={1} max={40} step={0.5} unit="%" zero={8} onChange={v => up({ size: v / 100 }, false)} onCommit={() => ed.commit()} />
         <Swatches label="Colour" value={t.color} onChange={c => up({ color: c || '#ffffff' })} />
         <div className="tool-row">
@@ -350,6 +366,22 @@ export function TextPanel({ ed }: { ed: Ed }) {
           <Slider label="Turn" value={sel.rotate || 0} min={-180} max={180} unit="°" onChange={v => ed.updateLayer(sel.id, { rotate: v }, false)} onCommit={() => ed.commit()} />
           <button type="button" className="btn danger-text" onClick={() => ed.removeLayer(sel.id)}><Icon name="trash" size={14} />Remove sticker</button>
         </>}
+      </Group>
+      <Group title="A picture on top" icon="image" open={!!pic}>
+        <p className="muted small">Your logo, a signature, or a second photo from the lab (see-through parts stay see-through).</p>
+        <button type="button" className="btn" onClick={() => setPicking(true)}><Icon name="plus" size={14} />Add a picture</button>
+        {pic && <>
+          <Slider label="Size" value={Math.round(pic.w * 100)} min={2} max={150} zero={30} unit="%" onChange={v => ed.updateLayer(pic.id, { w: v / 100 }, false)} onCommit={() => ed.commit()} />
+          <Slider label="Turn" value={pic.rotate || 0} min={-180} max={180} unit="°" onChange={v => ed.updateLayer(pic.id, { rotate: v }, false)} onCommit={() => ed.commit()} />
+          <Slider label="Opacity" value={Math.round((pic.opacity ?? 1) * 100)} min={5} max={100} zero={100} unit="%" onChange={v => ed.updateLayer(pic.id, { opacity: v / 100 }, false)} onCommit={() => ed.commit()} />
+          <button type="button" className="btn danger-text" onClick={() => ed.removeLayer(pic.id)}><Icon name="trash" size={14} />Remove the picture</button>
+        </>}
+        {picking && <LabPicker title="A picture to put on top" max={1} onClose={() => setPicking(false)} onDone={ims => {
+          setPicking(false)
+          const im = ims[0]
+          if (!im || im.id === ed.image.id) return
+          ed.addLayer({ id: newId(), type: 'image', src: im.id, updated: im.updated_at, x: 0.5, y: 0.5, w: 0.3, aspect: im.height && im.width ? im.height / im.width : 1, opacity: 1 } as ImageLayer)
+        }} />}
       </Group>
       <Group title="Watermark" icon="watermark" open={!!wm}>
         <div className="set-row"><span>On</span><Switch checked={!!wm} onChange={v => setWm(v ? {} : null)} label="Watermark" /></div>
@@ -565,6 +597,106 @@ export function InfoPanel({ ed, onMeta, saveVersion }: { ed: Ed; onMeta: (p: { t
       </Group>
       <button type="button" className="btn ghost danger-text" onClick={() => setReset(true)} disabled={!Object.keys(clean(r)).some(k => k !== 'v')}><Icon name="refresh" size={15} />Start over from the original</button>
       {reset && <Confirm title="Start over?" message="Every edit is removed (undo brings them back while the editor is open). Saved versions stay." confirmLabel="Start over" onCancel={() => setReset(false)} onConfirm={() => { setReset(false); ed.commit({}) }} />}
+    </div>
+  )
+}
+
+// ---- local adjustments ----
+
+export function LocalPanel({ ed }: { ed: Ed }) {
+  const r = ed.recipe
+  const masks = r.masks || []
+  const m = masks.find(x => x.id === ed.selected) || null
+  const add = (kind: Mask['kind']) => {
+    const base = { id: newId(), adjust: { exposure: kind === 'linear' ? -30 : 20 } }
+    const nm: Mask = kind === 'linear' ? { ...base, kind, x1: 0.5, y1: 0.05, x2: 0.5, y2: 0.55, name: 'Gradient' }
+      : kind === 'radial' ? { ...base, kind, x: 0.5, y: 0.45, rx: 0.25, ry: 0.25 * (ed.base.w / Math.max(1, ed.base.h)), feather: 60, name: 'Circle' }
+        : { ...base, kind, strokes: [], feather: 60, name: 'Brush' }
+    ed.commit({ ...r, masks: [...masks, nm] })
+    ed.select(nm.id)
+  }
+  const upd = (patch: Partial<Mask>, commit = true) => { if (!m) return; const n = { ...r, masks: masks.map(x => x.id === m.id ? { ...x, ...patch } as Mask : x) }; if (commit) ed.commit(n); else ed.set(n) }
+  const a: Adjust = { ...ADJUST_ZERO, ...(m?.adjust || {}) }
+  const label = (k: AdjustKey) => SLIDER_GROUPS.flatMap(g => g.sliders).find(x => x.key === k)!
+  return (
+    <div className="panel-body">
+      <p className="muted small">Change only part of the picture: darken a sky with a gradient, brighten a face with a circle, or paint where.</p>
+      <div className="tool-row">
+        <button type="button" className="btn" onClick={() => add('linear')}><Icon name="contrast" size={15} />Gradient</button>
+        <button type="button" className="btn" onClick={() => add('radial')}><Icon name="circle-o" size={15} />Circle</button>
+        <button type="button" className="btn" onClick={() => add('brush')}><Icon name="brush" size={15} />Brush</button>
+      </div>
+      {masks.length > 0 && <div className="chips wrap">{masks.map((x, i) => <button type="button" key={x.id} className={`chip ${ed.selected === x.id ? 'active' : ''}`} onClick={() => ed.select(x.id)}>{x.name || x.kind} {i + 1}</button>)}</div>}
+      {m ? <>
+        <div className="set-row"><span>Show where</span><Switch checked={ed.paint.show} onChange={v => ed.setPaint({ ...ed.paint, show: v })} label="Show the area" /></div>
+        {m.kind === 'brush' && <>
+          <Segmented size="sm" value={ed.paint.erase ? 'erase' : 'paint'} onChange={v => ed.setPaint({ ...ed.paint, erase: v === 'erase' })} options={[{ value: 'paint', label: 'Paint' }, { value: 'erase', label: 'Erase' }]} />
+          <Slider label="Brush size" value={Math.round(ed.paint.size * 100)} min={1} max={40} zero={8} unit="%" onChange={v => ed.setPaint({ ...ed.paint, size: v / 100 })} onCommit={() => {}} />
+        </>}
+        {m.kind !== 'linear' && <Slider label="Soft edge" value={'feather' in m ? m.feather : 50} min={2} max={100} zero={60} onDraft={ed.setDraft} onChange={v => upd({ feather: v } as Partial<Mask>, false)} onCommit={() => ed.commit()} />}
+        <div className="set-row"><span>The other way round</span><Switch checked={!!m.invert} onChange={v => upd({ invert: v })} label="Invert" /></div>
+        {LOCAL_SLIDERS.map(k => { const d = label(k); return <Slider key={k} label={d.label} value={a[k]} min={d.min} max={d.max} unit={d.unit} onDraft={ed.setDraft} onChange={v => upd({ adjust: { ...m.adjust, [k]: v } }, false)} onCommit={() => ed.commit()} /> })}
+        <button type="button" className="btn danger-text" onClick={() => { ed.commit({ ...r, masks: masks.filter(x => x.id !== m.id) }); ed.select(null) }}><Icon name="trash" size={14} />Remove this adjustment</button>
+      </> : masks.length > 0 && <p className="muted small">Pick one above to change it.</p>}
+    </div>
+  )
+}
+
+// ---- heal and clone ----
+
+export function HealPanel({ ed }: { ed: Ed }) {
+  const r = ed.recipe
+  const heals = r.heals || []
+  const sel = heals.find(h => h.id === ed.selected)
+  return (
+    <div className="panel-body">
+      <p className="small">Tap a spot, a speck of dust or a stray hair: it is painted over from a nearby patch. Drag the dashed circle to choose where from.</p>
+      <Segmented value={ed.paint.heal} onChange={v => ed.setPaint({ ...ed.paint, heal: v })} options={[{ value: 'heal', label: 'Heal (blends in)' }, { value: 'clone', label: 'Clone (exact copy)' }]} />
+      <Slider label="Size" value={Math.round(ed.paint.size * 100)} min={1} max={30} zero={4} unit="%" onChange={v => { ed.setPaint({ ...ed.paint, size: v / 100 }); if (sel) ed.set({ ...r, heals: heals.map(h => h.id === sel.id ? { ...h, r: v / 200 } : h) }) }} onCommit={() => sel && ed.commit()} />
+      {heals.length > 0 && <div className="tool-row">
+        <span className="muted small grow">{heals.length} {heals.length === 1 ? 'spot' : 'spots'}</span>
+        {sel && <button type="button" className="btn danger-text sm" onClick={() => { ed.commit({ ...r, heals: heals.filter(h => h.id !== sel.id) }); ed.select(null) }}><Icon name="trash" size={14} />Remove this</button>}
+        <button type="button" className="btn ghost sm" onClick={() => ed.commit({ ...r, heals: [] })}>Remove all</button>
+      </div>}
+    </div>
+  )
+}
+
+// ---- background ----
+
+export function CutoutPanel({ ed }: { ed: Ed }) {
+  const { toast } = useToast()
+  const r = ed.recipe
+  const c = r.cutout
+  const [busy, setBusy] = useState('')
+  const find = async () => {
+    try { setBusy('Starting…'); const mask = await findSubject(ed.src, setBusy); ed.commit({ ...r, cutout: { mask, bg: null, keep: [], remove: [], feather: 20 } }); toast('Background taken away: fix the edges with the brush if needed') } catch (e) { toast(errMsg(e), 'err') } finally { setBusy('') }
+  }
+  const set = (p: Partial<NonNullable<typeof c>>, commit = true) => { if (!c) return; const n = { ...r, cutout: { ...c, ...p } }; if (commit) ed.commit(n); else ed.set(n) }
+  return (
+    <div className="panel-body">
+      <p className="small">Keep the person, the pet or the thing, and take everything behind away. It runs on this device; nothing is sent anywhere.</p>
+      {!c ? <button type="button" className="btn primary block-btn" onClick={find} disabled={!!busy}>{busy ? <><Spinner />{busy}</> : <><Icon name="wand" size={15} />Remove the background</>}</button> : <>
+        <Group title="Fix the edges" icon="brush">
+          <Segmented value={ed.paint.keep ? 'keep' : 'remove'} onChange={v => ed.setPaint({ ...ed.paint, keep: v === 'keep' })} options={[{ value: 'keep', label: 'Bring back' }, { value: 'remove', label: 'Take away' }]} />
+          <Slider label="Brush size" value={Math.round(ed.paint.size * 100)} min={1} max={40} zero={8} unit="%" onChange={v => ed.setPaint({ ...ed.paint, size: v / 100 })} onCommit={() => {}} />
+          <Slider label="Soft edge" value={c.feather ?? 20} min={0} max={100} zero={20} onDraft={ed.setDraft} onChange={v => set({ feather: v }, false)} onCommit={() => ed.commit()} />
+          {(c.keep?.length || c.remove?.length) ? <button type="button" className="btn ghost sm" onClick={() => set({ keep: [], remove: [] })}>Undo all the brushing</button> : null}
+        </Group>
+        <Group title="Behind it" icon="image">
+          <div className="swatches">
+            <button type="button" className={`swatch none ${c.bg === null ? 'active' : ''}`} onClick={() => set({ bg: null })} title="See-through (save as PNG or WebP)" aria-label="See-through" />
+            <button type="button" className={`swatch blurbg ${c.bg === 'blur' ? 'active' : ''}`} onClick={() => set({ bg: 'blur' })} title="The background, blurred" aria-label="Blurred" />
+            {SWATCHES.map(col => <button type="button" key={col} className={`swatch ${c.bg === col ? 'active' : ''}`} style={{ background: col }} onClick={() => set({ bg: col })} aria-label={col} />)}
+            <label className="swatch custom" title="Another colour"><input type="color" value={c.bg && c.bg.startsWith('#') ? c.bg : '#ffffff'} onChange={e => set({ bg: e.target.value }, false)} onBlur={() => ed.commit()} /><Icon name="plus" size={12} /></label>
+          </div>
+          {c.bg === null && <p className="muted small">Save as PNG or WebP to keep it see-through; JPEG puts white behind.</p>}
+        </Group>
+        <div className="tool-row">
+          <button type="button" className="btn" onClick={find} disabled={!!busy}>{busy ? <><Spinner />{busy}</> : <><Icon name="refresh" size={14} />Find it again</>}</button>
+          <button type="button" className="btn danger-text" onClick={() => ed.commit({ ...r, cutout: null })}><Icon name="trash" size={14} />Bring the background back</button>
+        </div>
+      </>}
     </div>
   )
 }

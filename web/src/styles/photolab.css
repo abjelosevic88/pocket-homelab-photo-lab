@@ -436,3 +436,17 @@ a.list-row:hover { background: var(--surface-2); }
 }
 .grid { display: grid; gap: 12px; }
 .ov-wrap { display: contents; }
+
+/* local adjustments, heal, background */
+.paint-area { cursor: none; }
+.brush-ring { position: absolute; transform: translate(-50%, -50%); border-radius: 50%; border: 1.5px solid #fff; box-shadow: 0 0 0 1px rgba(0, 0, 0, .45), inset 0 0 0 1px rgba(0, 0, 0, .25); pointer-events: none; }
+.mask-tint { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+.mask-lines { position: absolute; inset: 0; pointer-events: none; overflow: visible; }
+.mask-lines line { stroke: #fff; stroke-width: 2; vector-effect: non-scaling-stroke; filter: drop-shadow(0 0 1px rgba(0, 0, 0, .7)); }
+.mask-ellipse { position: absolute; border-radius: 50%; border: 1.5px dashed #fff; box-shadow: 0 0 0 1px rgba(0, 0, 0, .35); cursor: move; touch-action: none; }
+.ov-handle.move { border-radius: 50%; background: var(--accent); border-color: #fff; cursor: move; }
+.heal-ring { position: absolute; transform: translate(-50%, -50%); aspect-ratio: 1; border-radius: 50%; border: 2px solid rgba(255, 255, 255, .85); box-shadow: 0 0 0 1px rgba(0, 0, 0, .4); cursor: move; touch-action: none; }
+.heal-ring.sel { border-color: var(--accent); }
+.heal-ring.src { border-style: dashed; border-color: #fff; }
+.font-btn.add { display: inline-flex; align-items: center; justify-content: center; gap: 4px; color: var(--accent-ink); border-style: dashed; cursor: pointer; }
+.swatch.blurbg { background: radial-gradient(circle at 35% 35%, #9ec5ff, #6b8f71 60%, #c7a27c); filter: blur(.4px); }

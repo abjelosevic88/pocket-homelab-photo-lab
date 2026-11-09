@@ -8,6 +8,7 @@ import { encode, EXT, loadBitmap, MAX_AREA, render } from '../lib/render/engine'
 import { downloadBlob, fileName, originalURL, saveLook, sendExport } from '../lib/images'
 import { makeZip } from '../lib/zip'
 import { withExif } from '../lib/exif'
+import { loadFonts } from '../lib/fonts'
 import { useApp } from '../lib/app-context'
 import { Icon } from './icons'
 import { Select } from './Select'
@@ -36,6 +37,7 @@ export function BatchDialog({ images, onClose, onDone, initialLook = '' }: { ima
   }
   const run = async () => {
     setBusy(true); setProgress({ done: 0, failed: [] })
+    await loadFonts()
     const zip: { name: string; blob: Blob }[] = []
     const failed: string[] = []
     for (let i = 0; i < images.length; i++) {

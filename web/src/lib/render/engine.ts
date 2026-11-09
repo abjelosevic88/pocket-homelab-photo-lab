@@ -3,7 +3,7 @@
 // drawings and stickers, then the frame. The same code makes the editor's
 // preview, thumbnails and the full-size picture that is saved.
 
-import { fontCSS, pixelsChange, type Layer, type Recipe, type Frame, type Crop } from '../recipe'
+import { fontCSS, perspectiveOn, pixelsChange, type BrushStroke, type Layer, type Recipe, type Frame, type Crop } from '../recipe'
 import { process, hexRGB } from './pixels'
 
 export type Canvas = HTMLCanvasElement
@@ -24,6 +24,9 @@ export async function loadBitmap(url: string, signal?: AbortSignal): Promise<Ima
 }
 export async function decodeBlob(blob: Blob): Promise<ImageBitmap> {
   try { return await createImageBitmap(blob, { imageOrientation: 'from-image' }) } catch {
+    const head = new Uint8Array(await blob.slice(0, 16).arrayBuffer())
+    const { isHeic, decodeHeic } = await import('../heic')
+    if (isHeic(head)) return decodeHeic(blob)
     // older Safari: go through an <img>
     const url = URL.createObjectURL(blob)
     try {
@@ -67,6 +70,20 @@ export function finalSize(r: Recipe, w: number, h: number): [number, number] { c
  * shape). full = the whole straightened frame, without the crop (cropping).
  */
 export function drawGeometry(src: CanvasImageSource, sw: number, sh: number, r: Recipe, sx: number, sy: number = sx, full = false): Canvas {
+  if (perspectiveOn(r.perspective)) {
+    // the whole frame, put upright, then the crop out of it
+    const [fw, fh] = orientedSize(r, sw, sh)
+    const c = full ? fullCrop : cropOf(r)
+    const ow = Math.max(1, Math.round(fw * c.w * sx)), oh = Math.max(1, Math.round(fh * c.h * sy))
+    const kx = ow / (fw * c.w), ky = oh / (fh * c.h)
+    const whole = warpPerspective(drawGeometry(src, sw, sh, { ...r, perspective: null }, kx, ky, true), r.perspective!.v, r.perspective!.h)
+    if (full) return whole
+    const out = makeCanvas(ow, oh)
+    const g = ctx2d(out)
+    g.imageSmoothingQuality = 'high'
+    g.drawImage(whole, c.x * whole.width, c.y * whole.height, c.w * whole.width, c.h * whole.height, 0, 0, ow, oh)
+    return out
+  }
   const [fw, fh] = orientedSize(r, sw, sh)
   const c = full ? fullCrop : cropOf(r)
   const out = makeCanvas(fw * c.w * sx, fh * c.h * sy)
@@ -87,6 +104,48 @@ export function drawGeometry(src: CanvasImageSource, sw: number, sh: number, r: 
     const hg = ctx2d(half); hg.imageSmoothingQuality = 'high'; hg.drawImage(src, 0, 0, half.width, half.height)
     g.drawImage(half, -sw / 2, -sh / 2, sw, sh)
   } else g.drawImage(src, -sw / 2, -sh / 2, sw, sh)
+  return out
+}
+
+/**
+ * Keystone correction: v > 0 straightens lines that lean in at the top
+ * (buildings shot from below), v < 0 at the bottom; h the same sideways.
+ * The picture is resampled from a smaller quad inside it, so no empty
+ * corners appear.
+ */
+export function warpPerspective(c: Canvas, v: number, h: number): Canvas {
+  const W = c.width, H = c.height
+  const a = (Math.abs(v) / 100) * 0.3, b = (Math.abs(h) / 100) * 0.3
+  // the source quad (fractions): TL, TR, BR, BL
+  const q = [[0, 0], [1, 0], [1, 1], [0, 1]]
+  if (v > 0) { q[0][0] += a; q[1][0] -= a } else if (v < 0) { q[3][0] += a; q[2][0] -= a }
+  if (h > 0) { q[1][1] += b; q[2][1] -= b } else if (h < 0) { q[0][1] += b; q[3][1] -= b }
+  const [x0, y0] = q[0], [x1, y1] = q[1], [x2, y2] = q[2], [x3, y3] = q[3]
+  const dx1 = x1 - x2, dx2 = x3 - x2, dx3 = x0 - x1 + x2 - x3, dy1 = y1 - y2, dy2 = y3 - y2, dy3 = y0 - y1 + y2 - y3
+  const den = dx1 * dy2 - dx2 * dy1
+  const G = den ? (dx3 * dy2 - dx2 * dy3) / den : 0, Hh = den ? (dx1 * dy3 - dx3 * dy1) / den : 0
+  const A = x1 - x0 + G * x1, B = x3 - x0 + Hh * x3, C = x0, D = y1 - y0 + G * y1, E = y3 - y0 + Hh * y3, F = y0
+  const sp = c.getContext('2d', { willReadFrequently: true })!.getImageData(0, 0, W, H).data
+  const out = makeCanvas(W, H)
+  const od = new ImageData(W, H)
+  const dp = od.data
+  for (let yy = 0; yy < H; yy++) {
+    const t = (yy + 0.5) / H
+    for (let xx = 0; xx < W; xx++) {
+      const s = (xx + 0.5) / W
+      const z = G * s + Hh * t + 1
+      const fx = ((A * s + B * t + C) / z) * W - 0.5, fy = ((D * s + E * t + F) / z) * H - 0.5
+      const ix = Math.max(0, Math.min(W - 2, Math.floor(fx))), iy = Math.max(0, Math.min(H - 2, Math.floor(fy)))
+      const ax = Math.max(0, Math.min(1, fx - ix)), ay = Math.max(0, Math.min(1, fy - iy))
+      const i00 = (iy * W + ix) * 4, i10 = i00 + 4, i01 = i00 + W * 4, i11 = i01 + 4
+      const o = (yy * W + xx) * 4
+      for (let k = 0; k < 4; k++) {
+        const top = sp[i00 + k] + (sp[i10 + k] - sp[i00 + k]) * ax, bot = sp[i01 + k] + (sp[i11 + k] - sp[i01 + k]) * ax
+        dp[o + k] = top + (bot - top) * ay
+      }
+    }
+  }
+  ctx2d(out).putImageData(od, 0, 0)
   return out
 }
 
@@ -182,6 +241,16 @@ export function drawLayers(g: CanvasRenderingContext2D, layers: Layer[] | undefi
         g.stroke()
         break
       }
+      case 'image': {
+        const bmp = layerBitmaps.get(layerKey(l))
+        if (!bmp) break
+        const w = l.w * W, h = w * (l.aspect || bmp.height / bmp.width)
+        g.translate(l.x * W, l.y * H)
+        if (l.rotate) g.rotate(l.rotate * RAD)
+        g.imageSmoothingQuality = 'high'
+        g.drawImage(bmp, -w / 2, -h / 2, w, h)
+        break
+      }
       case 'sticker': {
         const s = l.size * U
         g.translate(l.x * W, l.y * H)
@@ -250,6 +319,78 @@ function drawText(g: CanvasRenderingContext2D, l: Extract<Layer, { type: 'text' 
     g.fillStyle = l.color
     g.fillText(t, ox, y)
   })
+}
+
+// ---- pictures on top (a logo, a second photo) ----
+
+const layerBitmaps = new Map<string, ImageBitmap>()
+const layerKey = (l: Extract<Layer, { type: 'image' }>) => `${l.src}:${l.updated || ''}`
+
+/** Loads the pictures the edit puts on top (their current look); call before finish(). */
+export async function prepareLayers(r: Recipe): Promise<boolean> {
+  let loaded = false
+  for (const l of r.layers || []) {
+    if (l.type !== 'image' || layerBitmaps.has(layerKey(l))) continue
+    try { layerBitmaps.set(layerKey(l), await loadBitmap(`/api/v1/images/${l.src}/preview?v=${encodeURIComponent(l.updated || '')}`)); loaded = true } catch { /* removed from the lab */ }
+  }
+  return loaded
+}
+
+// ---- the background taken away ----
+
+const cutoutMasks = new Map<string, Canvas>()
+
+/** The cut-out's mask (white = keep) as an alpha mask; decoded once. */
+export async function prepareCutout(r: Recipe): Promise<void> {
+  const m = r.cutout?.mask
+  if (!m || cutoutMasks.has(m)) return
+  const res = await fetch(m)
+  const bmp = await createImageBitmap(await res.blob())
+  const c = makeCanvas(bmp.width, bmp.height)
+  const g = c.getContext('2d', { willReadFrequently: true })!
+  g.drawImage(bmp, 0, 0)
+  const d = g.getImageData(0, 0, c.width, c.height)
+  for (let i = 0; i < d.data.length; i += 4) { d.data[i + 3] = d.data[i]; d.data[i] = d.data[i + 1] = d.data[i + 2] = 255 }
+  g.putImageData(d, 0, 0)
+  if (cutoutMasks.size > 8) cutoutMasks.clear()
+  cutoutMasks.set(m, c)
+}
+
+function strokeOn(g: CanvasRenderingContext2D, st: BrushStroke, W: number, H: number) {
+  const U = Math.min(W, H)
+  g.lineWidth = Math.max(1, st.size * U); g.lineCap = 'round'; g.lineJoin = 'round'
+  g.beginPath()
+  st.points.forEach(([x, y], i) => i ? g.lineTo(x * W, y * H) : g.moveTo(x * W, y * H))
+  if (st.points.length === 1) g.lineTo(st.points[0][0] * W + 0.1, st.points[0][1] * H)
+  g.stroke()
+}
+
+/** Takes the background out of a rendered picture (sw, sh: the original's size). */
+export function applyCutout(base: Canvas, sw: number, sh: number, r: Recipe, uncropped: boolean): Canvas {
+  const cut = r.cutout
+  const mask = cut && cutoutMasks.get(cut.mask)
+  if (!cut || !mask) return base
+  const W = base.width, H = base.height
+  const [cw, ch] = uncropped ? orientedSize(r, sw, sh) : cropSize(r, sw, sh)
+  const m = drawGeometry(mask, sw, sh, { ...r, cutout: null }, W / cw, H / ch, uncropped)
+  const mg = ctx2d(m)
+  if (!uncropped) {
+    mg.strokeStyle = '#fff'
+    for (const st of cut.keep || []) { mg.globalCompositeOperation = 'source-over'; strokeOn(mg, st, W, H) }
+    for (const st of cut.remove || []) { mg.globalCompositeOperation = 'destination-out'; strokeOn(mg, st, W, H) }
+  }
+  const out = makeCanvas(W, H)
+  const g = ctx2d(out)
+  if (cut.bg === 'blur') { g.filter = `blur(${Math.max(W, H) / 40}px)`; g.drawImage(base, 0, 0); g.filter = 'none' }
+  else if (cut.bg) { g.fillStyle = cut.bg; g.fillRect(0, 0, W, H) }
+  const fg = makeCanvas(W, H)
+  const fgc = ctx2d(fg)
+  fgc.drawImage(base, 0, 0)
+  fgc.globalCompositeOperation = 'destination-in'
+  if (cut.feather) fgc.filter = `blur(${(cut.feather / 100) * Math.min(W, H) * 0.01}px)`
+  fgc.drawImage(m, 0, 0, W, H)
+  g.drawImage(fg, 0, 0)
+  return out
 }
 
 // ---- the frame ----
@@ -324,7 +465,10 @@ export async function renderBase(src: CanvasImageSource, sw: number, sh: number,
   if (o.maxEdge && Math.max(tw, th) > o.maxEdge) { const k = o.maxEdge / Math.max(tw, th); tw *= k; th *= k }
   if (o.maxArea && tw * th > o.maxArea) { const k = Math.sqrt(o.maxArea / (tw * th)); tw *= k; th *= k }
   const c = drawGeometry(src, sw, sh, r, Math.max(1, Math.round(tw)) / cw, Math.max(1, Math.round(th)) / ch, !!o.uncropped)
-  return o.noPixels ? c : runPixels(c, r)
+  if (o.noPixels) return c
+  const p = await runPixels(c, r)
+  if (r.cutout) { await prepareCutout(r); return applyCutout(p, sw, sh, r, !!o.uncropped) }
+  return p
 }
 
 /** Text, drawings and the frame on top of a base picture (a new canvas). */
@@ -341,7 +485,9 @@ export function finish(base: Canvas, r: Recipe, o: RenderOpts = {}, skipLayer?: 
 }
 
 export async function render(src: CanvasImageSource, sw: number, sh: number, r: Recipe, o: RenderOpts = {}): Promise<Canvas> {
-  return finish(await renderBase(src, sw, sh, r, o), r, o)
+  const base = await renderBase(src, sw, sh, r, o)
+  await prepareLayers(r)
+  return finish(base, r, o)
 }
 
 export const MIME: Record<string, string> = { jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp', avif: 'image/avif' }

@@ -36,10 +36,10 @@ func (s *Store) CreateImage(ctx context.Context, uid int64, im *Image, thumb []b
 		im.Recipe = json.RawMessage(`{}`)
 	}
 	now := Now()
-	res, err := s.DB.ExecContext(ctx, `INSERT INTO images (user_id, title, file, mime, width, height, bytes, sha256, source, source_ref, source_name, recipe, edited, preview, thumb, favorite, note, taken_at, edited_at, created_at, updated_at, camera)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+	res, err := s.DB.ExecContext(ctx, `INSERT INTO images (user_id, title, file, mime, width, height, bytes, sha256, source, source_ref, source_name, recipe, edited, preview, thumb, favorite, note, taken_at, edited_at, created_at, updated_at, camera, stale)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		uid, im.Title, im.File, im.Mime, im.Width, im.Height, im.Bytes, im.SHA256, im.Source, im.SourceRef, im.SourceName, string(im.Recipe), boolInt(im.Edited), im.Preview, thumb,
-		boolInt(im.Favorite), im.Note, im.TakenAt, im.EditedAt, now, now, im.Camera)
+		boolInt(im.Favorite), im.Note, im.TakenAt, im.EditedAt, now, now, im.Camera, boolInt(im.Stale))
 	if err != nil {
 		return err
 	}

@@ -337,10 +337,10 @@ func (s *Server) handleFilesList(w http.ResponseWriter, r *http.Request) {
 
 func pictureName(n string) bool {
 	switch strings.ToLower(path.Ext(n)) {
-	case ".jpg", ".jpeg", ".png", ".webp", ".gif", ".avif", ".bmp", ".tif", ".tiff":
+	case ".jpg", ".jpeg", ".png", ".webp", ".gif", ".avif", ".bmp", ".tif", ".tiff", ".heic", ".heif":
 		return true
 	}
-	return false
+	return imaging.IsRaw(n)
 }
 
 // handleFilesThumb relays a picture's thumbnail from Pocket Files.

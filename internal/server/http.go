@@ -26,7 +26,7 @@ func (s *Server) Router() http.Handler {
 	r.Use(middleware.RequestID)
 	r.Use(s.logging)
 	r.Use(middleware.Recoverer)
-	r.Use(middleware.Compress(5))
+	r.Use(middleware.Compress(5, "text/html", "text/css", "text/plain", "text/javascript", "application/javascript", "application/json", "image/svg+xml", "application/manifest+json", "application/wasm"))
 
 	r.Get("/pocket-ask.js", s.core.AskWidget("photolab"))
 	r.Get("/healthz", s.handleHealth)
@@ -76,6 +76,12 @@ func (s *Server) Router() http.Handler {
 			r.Put("/presets/{id}", s.handleUpdatePreset)
 			r.Delete("/presets/{id}", s.handleDeletePreset)
 			r.Get("/presets/{id}/thumb", s.handlePresetThumb)
+
+			// fonts of your own
+			r.Get("/fonts", s.handleListFonts)
+			r.Post("/fonts", s.handleUploadFont)
+			r.Get("/fonts/{id}/file", s.handleFontFile)
+			r.Delete("/fonts/{id}", s.handleDeleteFont)
 
 			// saving a finished picture
 			r.Get("/exports", s.handleListExports)

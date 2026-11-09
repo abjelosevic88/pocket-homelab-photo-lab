@@ -1,10 +1,12 @@
 import type { Image } from '../../lib/types'
 import type { Layer, Recipe } from '../../lib/recipe'
 
-export type Tool = 'crop' | 'adjust' | 'color' | 'looks' | 'effects' | 'text' | 'draw' | 'hide' | 'frame' | 'resize' | 'info'
+export type Tool = 'crop' | 'adjust' | 'local' | 'color' | 'looks' | 'effects' | 'heal' | 'cutout' | 'text' | 'draw' | 'hide' | 'frame' | 'resize' | 'info'
 export type DrawMode = 'brush' | 'marker' | 'rect' | 'ellipse' | 'line' | 'arrow' | 'select'
 export interface Brush { color: string; width: number; opacity: number; fill: string | null }
 export interface RedactOpts { mode: 'blur' | 'pixelate' | 'black'; strength: number; round: boolean }
+/** The brush for local adjustments, healing and fixing a cut-out: size is a fraction of the short side. */
+export interface PaintOpts { size: number; erase: boolean; show: boolean; heal: 'heal' | 'clone'; keep: boolean }
 
 /** What every panel and the stage can reach. */
 export interface Ed {
@@ -27,6 +29,8 @@ export interface Ed {
   setBrush: (b: Brush) => void
   redact: RedactOpts
   setRedact: (r: RedactOpts) => void
+  paint: PaintOpts
+  setPaint: (p: PaintOpts) => void
   /** the size of the rendered picture (without the frame) the stage shows */
   base: { w: number; h: number }
   /** the current look as a canvas (for thumbnails and the AI) */

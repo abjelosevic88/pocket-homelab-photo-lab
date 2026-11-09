@@ -108,12 +108,24 @@ func (s *Server) addImage(ctx context.Context, uid int64, in newImage) (*store.I
 	if int64(len(in.data)) > s.cfg.MaxUploadBytes {
 		return nil, false, &userErr{fmt.Sprintf("the picture is larger than %d MB", s.cfg.MaxUploadBytes>>20)}
 	}
+	if imaging.IsRaw(in.name) {
+		// a camera RAW: the full-size JPEG the camera put inside it
+		prev, err := imaging.RawPreview(in.data)
+		if err != nil {
+			return nil, false, &userErr{"this RAW file has no picture inside that the lab can open"}
+		}
+		cam := ""
+		if inf, err := imaging.Probe(prev); err == nil {
+			cam = inf.Camera
+		}
+		if in.note == "" {
+			in.note = "From the camera's own full-size JPEG inside " + path.Base(in.name)
+		}
+		in.data, in.camera = prev, firstNonEmpty(in.camera, cam)
+	}
 	info, err := imaging.Probe(in.data)
 	if err != nil {
 		return nil, false, &userErr{imaging.ErrUnsupported.Error()}
-	}
-	if info.Mime == "image/heic" && len(in.thumb) == 0 {
-		return nil, false, &userErr{"HEIC pictures can only be opened in Safari; save it as JPEG first (Pocket Photos sends a JPEG by itself)"}
 	}
 	sum := sha256.Sum256(in.data)
 	sha := hex.EncodeToString(sum[:])
@@ -155,6 +167,9 @@ func (s *Server) addImage(ctx context.Context, uid int64, in newImage) (*store.I
 	im := &store.Image{Title: clip(title, 200), File: rel, Mime: mime, Width: info.Width, Height: info.Height, Bytes: int64(len(data)), SHA256: sha,
 		Source: firstNonEmpty(in.source, "upload"), SourceRef: in.sourceRef, SourceName: clip(in.name, 255), TakenAt: taken, Note: clip(in.note, 2000),
 		Camera: clip(firstNonEmpty(in.camera, info.Camera), 120)}
+	if len(thumb) == 0 {
+		im.Stale = true // HEIC and friends: the next browser that opens the lab draws the thumbnail
+	}
 	if err := s.store.CreateImage(ctx, uid, im, thumb); err != nil {
 		_ = os.Remove(s.filePath(rel))
 		return nil, false, err
