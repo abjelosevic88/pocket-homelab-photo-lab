@@ -134,6 +134,26 @@ type Settings struct {
 	FilesToken     string `json:"files_token"`
 	FilesPublicURL string `json:"files_public_url"`
 
+	BlogMode      string `json:"blog_mode"`
+	BlogURL       string `json:"blog_url"`
+	BlogToken     string `json:"blog_token"`
+	BlogPublicURL string `json:"blog_public_url"`
+
+	ChatMode      string `json:"chat_mode"`
+	ChatURL       string `json:"chat_url"`
+	ChatToken     string `json:"chat_token"`
+	ChatPublicURL string `json:"chat_public_url"`
+
+	NotesMode      string `json:"notes_mode"`
+	NotesURL       string `json:"notes_url"`
+	NotesToken     string `json:"notes_token"`
+	NotesPublicURL string `json:"notes_public_url"`
+
+	DocumentsMode      string `json:"documents_mode"`
+	DocumentsURL       string `json:"documents_url"`
+	DocumentsToken     string `json:"documents_token"`
+	DocumentsPublicURL string `json:"documents_public_url"`
+
 	// AI for "Suggest an edit" and "Describe": Pocket AI through Core, or an
 	// OpenAI-compatible API with the person's own key.
 	AIProvider    string `json:"ai_provider"` // auto | pocket | openai

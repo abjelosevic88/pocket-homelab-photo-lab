@@ -44,6 +44,10 @@ func (s *Server) publicSettings(ctx context.Context, u *store.User, st store.Set
 		"preview_size": st.PreviewSize, "show_grid": st.ShowGrid, "histogram": st.Histogram, "compare_style": st.CompareStyle, "confirm_leave": st.ConfirmLeave, "sort": st.Sort,
 		"photos_url": st.PhotosURL, "photos_token": mask(st.PhotosToken), "photos_public_url": st.PhotosPublicURL,
 		"files_url": st.FilesURL, "files_token": mask(st.FilesToken), "files_public_url": st.FilesPublicURL,
+		"blog_url": st.BlogURL, "blog_token": mask(st.BlogToken), "blog_public_url": st.BlogPublicURL,
+		"chat_url": st.ChatURL, "chat_token": mask(st.ChatToken), "chat_public_url": st.ChatPublicURL,
+		"notes_url": st.NotesURL, "notes_token": mask(st.NotesToken), "notes_public_url": st.NotesPublicURL,
+		"documents_url": st.DocumentsURL, "documents_token": mask(st.DocumentsToken), "documents_public_url": st.DocumentsPublicURL,
 		"ai_provider": st.AIProvider, "ai_pocket_model": st.AIPocketModel, "ai_photos": st.AIPhotos,
 		"openai_api_key": mask(st.OpenAIKey), "openai_model": st.OpenAIModel, "openai_base_url": st.OpenAIBaseURL,
 		"setup_complete": st.SetupComplete, "base_url": s.cfg.BaseURL, "max_upload_mb": s.cfg.MaxUploadBytes >> 20,
@@ -186,6 +190,18 @@ func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 	url("files_url", &cur.FilesURL, in.FilesURL)
 	secret("files_token", &cur.FilesToken, in.FilesToken)
 	url("files_public_url", &cur.FilesPublicURL, in.FilesPublicURL)
+	url("blog_url", &cur.BlogURL, in.BlogURL)
+	secret("blog_token", &cur.BlogToken, in.BlogToken)
+	url("blog_public_url", &cur.BlogPublicURL, in.BlogPublicURL)
+	url("chat_url", &cur.ChatURL, in.ChatURL)
+	secret("chat_token", &cur.ChatToken, in.ChatToken)
+	url("chat_public_url", &cur.ChatPublicURL, in.ChatPublicURL)
+	url("notes_url", &cur.NotesURL, in.NotesURL)
+	secret("notes_token", &cur.NotesToken, in.NotesToken)
+	url("notes_public_url", &cur.NotesPublicURL, in.NotesPublicURL)
+	url("documents_url", &cur.DocumentsURL, in.DocumentsURL)
+	secret("documents_token", &cur.DocumentsToken, in.DocumentsToken)
+	url("documents_public_url", &cur.DocumentsPublicURL, in.DocumentsPublicURL)
 	if keys["ai_provider"] {
 		if !validAIProvider(in.AIProvider) {
 			bad("AI is automatic, Pocket AI or OpenAI")
@@ -210,6 +226,10 @@ func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	mode("photos_mode", &cur.PhotosMode, in.PhotosMode)
 	mode("files_mode", &cur.FilesMode, in.FilesMode)
+	mode("blog_mode", &cur.BlogMode, in.BlogMode)
+	mode("chat_mode", &cur.ChatMode, in.ChatMode)
+	mode("notes_mode", &cur.NotesMode, in.NotesMode)
+	mode("documents_mode", &cur.DocumentsMode, in.DocumentsMode)
 	if err := s.store.SaveUserSettings(r.Context(), me.ID, cur); err != nil {
 		s.fail(w, err, "save settings")
 		return
@@ -292,6 +312,8 @@ func (s *Server) handleIntegrationTest(w http.ResponseWriter, r *http.Request) {
 					var sp []pocket.Space
 					sp, err = conn.client.Spaces(ctx)
 					msg = fmt.Sprintf("Pocket Files %s, %s, %d places", v, how, len(sp))
+				default:
+					msg = fmt.Sprintf("%s %s, %s", a.name, v, how)
 				}
 			}
 		}

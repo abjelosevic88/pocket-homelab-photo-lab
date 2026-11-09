@@ -26,6 +26,11 @@ const (
 	scopePhotosWrite = "photos:write"
 	scopeFilesRead   = "files:read"
 	scopeFilesWrite  = "files:write"
+	scopeBlogWrite   = "blog:write"
+	scopeChatRead    = "chat:read"
+	scopeChatWrite   = "chat:write"
+	scopeNotesWrite  = "notes:write"
+	scopeDocsWrite   = "documents:write"
 )
 
 // pocketApp is one sibling Pocket app Photo Lab acts in.
@@ -38,7 +43,11 @@ type pocketApp struct {
 var (
 	appPhotos  = pocketApp{"photos", "Pocket Photos", []string{scopePhotosRead, scopePhotosWrite}, "Pick pictures from your library to edit, and save the edited ones back as new photos (your originals stay as they are)"}
 	appFiles   = pocketApp{"files", "Pocket Files", []string{scopeFilesRead, scopeFilesWrite}, "Open pictures from your files, and save edited ones into a folder"}
-	pocketApps = []pocketApp{appPhotos, appFiles}
+	appBlog    = pocketApp{"blog", "Pocket Blog", []string{scopeBlogWrite}, "Start a blog post with a finished picture, as a draft for you to finish"}
+	appChat    = pocketApp{"chat", "Pocket Chat", []string{scopeChatRead, scopeChatWrite}, "Send a finished picture into one of your conversations"}
+	appNotes   = pocketApp{"notes", "Pocket Notes", []string{scopeNotesWrite}, "Keep a finished picture in a new note"}
+	appDocs    = pocketApp{"documents", "Pocket Documents", []string{scopeDocsWrite}, "File a finished picture (a scan, a receipt) in your document archive"}
+	pocketApps = []pocketApp{appPhotos, appFiles, appBlog, appChat, appNotes, appDocs}
 )
 
 func appBySlug(slug string) (pocketApp, bool) {
@@ -123,6 +132,14 @@ func connSettings(st store.Settings, a pocketApp) (mode, url, token, public stri
 		return st.PhotosMode, st.PhotosURL, st.PhotosToken, st.PhotosPublicURL
 	case "files":
 		return st.FilesMode, st.FilesURL, st.FilesToken, st.FilesPublicURL
+	case "blog":
+		return st.BlogMode, st.BlogURL, st.BlogToken, st.BlogPublicURL
+	case "chat":
+		return st.ChatMode, st.ChatURL, st.ChatToken, st.ChatPublicURL
+	case "notes":
+		return st.NotesMode, st.NotesURL, st.NotesToken, st.NotesPublicURL
+	case "documents":
+		return st.DocumentsMode, st.DocumentsURL, st.DocumentsToken, st.DocumentsPublicURL
 	}
 	return "", "", "", ""
 }

@@ -88,6 +88,7 @@ func (s *Server) Router() http.Handler {
 			r.Get("/sources/files/spaces", s.handleFilesSpaces)
 			r.Get("/sources/files/list", s.handleFilesList)
 			r.Get("/sources/files/thumb", s.handleFilesThumb)
+			r.Get("/sources/chat/conversations", s.handleChatConversations)
 
 			// AI
 			r.Get("/ai/status", s.handleAIStatus)

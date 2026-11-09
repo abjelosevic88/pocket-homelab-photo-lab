@@ -1,12 +1,15 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
+	"net/textproto"
 	"net/url"
 	"path"
 	"strings"
@@ -372,15 +375,18 @@ func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	uid := actorID(ctx)
 	var meta struct {
-		ImageID     int64  `json:"image_id"`
-		Destination string `json:"destination"`
-		Name        string `json:"name"`
-		Format      string `json:"format"`
-		Width       int    `json:"width"`
-		Height      int    `json:"height"`
-		Bytes       int64  `json:"bytes"`
-		Space       string `json:"space"`
-		Folder      string `json:"folder"`
+		ImageID      int64  `json:"image_id"`
+		Destination  string `json:"destination"`
+		Name         string `json:"name"`
+		Format       string `json:"format"`
+		Width        int    `json:"width"`
+		Height       int    `json:"height"`
+		Bytes        int64  `json:"bytes"`
+		Space        string `json:"space"`
+		Folder       string `json:"folder"`
+		Conversation int64  `json:"conversation"` // Pocket Chat
+		Text         string `json:"text"`         // a message (Chat), a caption (Blog, Notes)
+		Title        string `json:"title"`        // the post, note or document
 	}
 	var data []byte
 	if strings.HasPrefix(r.Header.Get("Content-Type"), "multipart/") {
@@ -428,6 +434,19 @@ func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {
 	openURL, stackErr, stacked := "", "", false
 	switch e.Destination {
 	case "download":
+	case "blog", "chat", "notes", "documents":
+		if len(data) == 0 || imaging.Sniff(data) == "" {
+			writeErr(w, http.StatusBadRequest, "send the finished picture (field \"file\")")
+			return
+		}
+		e.Bytes = int64(len(data))
+		title := clip(firstNonEmpty(strings.TrimSpace(meta.Title), e.Title), 200)
+		target, open, err := s.sendToApp(ctx, e.Destination, name, mime, data, title, clip(strings.TrimSpace(meta.Text), 4000), meta.Conversation, im)
+		if err != nil {
+			s.failUser(w, err, e.Destination)
+			return
+		}
+		e.Target, openURL = target, open
 	case "photos", "files":
 		if len(data) == 0 || imaging.Sniff(data) == "" {
 			writeErr(w, http.StatusBadRequest, "send the finished picture (field \"file\")")
@@ -484,7 +503,7 @@ func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {
 			openURL = c.public
 		}
 	default:
-		writeErr(w, http.StatusBadRequest, "destination is download, photos or files")
+		writeErr(w, http.StatusBadRequest, "destination is download, photos, files, blog, chat, notes or documents")
 		return
 	}
 	if err := s.store.CreateExport(ctx, uid, e); err != nil {
@@ -527,4 +546,145 @@ func safeName(name, format string) string {
 		base = "picture"
 	}
 	return clip(base, 120) + ext
+}
+
+// multipartFile builds a body with one file and some fields.
+func multipartFile(field, name, mime string, data []byte, fields map[string]string) (*bytes.Buffer, string) {
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+	for k, v := range fields {
+		_ = mw.WriteField(k, v)
+	}
+	h := make(textproto.MIMEHeader)
+	h.Set("Content-Disposition", fmt.Sprintf(`form-data; name=%q; filename=%q`, field, name))
+	h.Set("Content-Type", mime)
+	fw, _ := mw.CreatePart(h)
+	_, _ = fw.Write(data)
+	_ = mw.Close()
+	return &buf, mw.FormDataContentType()
+}
+
+// sendToApp takes a finished picture to Pocket Blog (a draft post), Chat (a
+// message), Notes (a new note) or Documents (the archive). It answers what was
+// made there and where to open it.
+func (s *Server) sendToApp(ctx context.Context, dest, name, mime string, data []byte, title, text string, conv int64, im *store.Image) (string, string, error) {
+	app := map[string]pocketApp{"blog": appBlog, "chat": appChat, "notes": appNotes, "documents": appDocs}[dest]
+	c, err := s.conn(ctx, app, app.scopes...)
+	if err != nil {
+		return "", "", err
+	}
+	fail := func(err error) (string, string, error) { return "", "", &userErr{app.name + ": " + err.Error()} }
+	ref := ""
+	if im != nil {
+		ref = fmt.Sprint(im.ID)
+	}
+	switch dest {
+	case "blog":
+		body, ct := multipartFile("file", name, mime, data, map[string]string{"alt": title})
+		res, err := c.client.Do(ctx, http.MethodPost, "/api/v1/media", nil, body, ct)
+		if err != nil {
+			return fail(err)
+		}
+		var media []struct {
+			URL string `json:"url"`
+		}
+		_ = json.NewDecoder(io.LimitReader(res.Body, 1<<20)).Decode(&media)
+		res.Body.Close()
+		if len(media) == 0 || media[0].URL == "" {
+			return fail(errors.New("the picture was not taken"))
+		}
+		md := "![" + strings.NewReplacer("[", "", "]", "").Replace(title) + "](" + media[0].URL + ")\n"
+		if text != "" {
+			md += "\n" + text + "\n"
+		}
+		var post struct {
+			ID int64 `json:"id"`
+		}
+		if err := c.client.JSON(ctx, http.MethodPost, "/api/v1/posts", nil, map[string]any{"title": title, "body": md, "cover": media[0].URL, "cover_alt": title, "source": "photolab", "source_ref": ref}, &post); err != nil {
+			return fail(err)
+		}
+		return fmt.Sprintf("post %d", post.ID), c.public, nil
+	case "chat":
+		if conv <= 0 {
+			return "", "", &userErr{"choose a conversation"}
+		}
+		body, ct := multipartFile("file", name, mime, data, nil)
+		res, err := c.client.Do(ctx, http.MethodPost, fmt.Sprintf("/api/v1/conversations/%d/upload", conv), nil, body, ct)
+		if err != nil {
+			return fail(err)
+		}
+		var att struct {
+			ID int64 `json:"id"`
+		}
+		_ = json.NewDecoder(io.LimitReader(res.Body, 1<<20)).Decode(&att)
+		res.Body.Close()
+		if att.ID == 0 {
+			return fail(errors.New("the picture was not taken"))
+		}
+		var msg struct {
+			ID int64 `json:"id"`
+		}
+		if err := c.client.JSON(ctx, http.MethodPost, fmt.Sprintf("/api/v1/conversations/%d/messages", conv), nil, map[string]any{"text": text, "attachments": []int64{att.ID}}, &msg); err != nil {
+			return fail(err)
+		}
+		return fmt.Sprintf("message %d", msg.ID), c.public, nil
+	case "notes":
+		var note struct {
+			ID int64 `json:"id"`
+		}
+		if err := c.client.JSON(ctx, http.MethodPost, "/api/v1/notes", nil, map[string]any{"title": title, "content": text}, &note); err != nil {
+			return fail(err)
+		}
+		if note.ID == 0 {
+			return fail(errors.New("no note was made"))
+		}
+		body, ct := multipartFile("file", name, mime, data, nil)
+		res, err := c.client.Do(ctx, http.MethodPost, fmt.Sprintf("/api/v1/notes/%d/attachments", note.ID), nil, body, ct)
+		if err != nil {
+			return fail(err)
+		}
+		var att struct {
+			Markdown string `json:"markdown"`
+		}
+		_ = json.NewDecoder(io.LimitReader(res.Body, 1<<20)).Decode(&att)
+		res.Body.Close()
+		if att.Markdown != "" {
+			if err := c.client.JSON(ctx, http.MethodPost, fmt.Sprintf("/api/v1/notes/%d/append", note.ID), nil, map[string]any{"text": att.Markdown}, nil); err != nil {
+				return fail(err)
+			}
+		}
+		return fmt.Sprintf("note %d", note.ID), c.public, nil
+	default: // documents
+		fields := map[string]string{"title": title, "source": "photolab"}
+		if im != nil && len(im.TakenAt) >= 10 {
+			fields["created"] = im.TakenAt[:10]
+		}
+		body, ct := multipartFile("document", name, mime, data, fields)
+		res, err := c.client.Do(ctx, http.MethodPost, "/api/v1/documents", nil, body, ct)
+		if err != nil {
+			return fail(err)
+		}
+		res.Body.Close()
+		return "document", c.public, nil
+	}
+}
+
+// handleChatConversations lists the person's conversations in Pocket Chat (to send a picture to).
+func (s *Server) handleChatConversations(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	c, err := s.conn(ctx, appChat, scopeChatRead)
+	if err != nil {
+		s.failUser(w, err, "chat")
+		return
+	}
+	var list []struct {
+		ID   int64  `json:"id"`
+		Name string `json:"name"`
+		Kind string `json:"kind"`
+	}
+	if err := c.client.JSON(ctx, http.MethodGet, "/api/v1/conversations", nil, nil, &list); err != nil {
+		writeErr(w, http.StatusBadGateway, "Pocket Chat: "+err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, list)
 }

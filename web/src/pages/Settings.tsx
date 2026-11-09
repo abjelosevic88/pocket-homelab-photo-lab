@@ -17,7 +17,7 @@ type TabId = 'general' | 'saving' | 'apps' | 'ai' | 'profile' | 'people' | 'toke
 const TABS: { id: TabId; label: string; icon: string; sub: string }[] = [
   { id: 'general', label: 'Pictures & editor', icon: 'image', sub: 'How your pictures are listed, how sharp the editor works, the histogram and the crop grid, dates.' },
   { id: 'saving', label: 'Saving pictures', icon: 'download', sub: 'What “Save a copy” starts with: the format, the quality, the size, the name, and where it goes.' },
-  { id: 'apps', label: 'Connected apps', icon: 'layers', sub: 'Pocket Photos (pick pictures, save edits back as new photos) and Pocket Files (open pictures, save into a folder).' },
+  { id: 'apps', label: 'Connected apps', icon: 'layers', sub: 'Pocket Photos and Pocket Files (pictures in and out), Blog, Chat, Notes and Documents (send finished pictures there).' },
   { id: 'ai', label: 'AI', icon: 'sparkles', sub: 'Who suggests edits and describes pictures: Pocket AI through Core, or your own OpenAI key.' },
   { id: 'profile', label: 'Profile', icon: 'user', sub: 'Your name, email and password.' },
   { id: 'people', label: 'People', icon: 'users', sub: 'Everyone who has an account on this box.' },
@@ -154,7 +154,7 @@ function Saving() {
       </Section>
       <Section title="Where it goes" icon="share">
         <SettingRow title="Save to" help="Pocket Photos adds a new photo next to the original; Pocket Files saves into a folder of yours.">
-          <Segmented value={f.save_to} onChange={v => setF({ ...f, save_to: v })} options={[{ value: 'download', label: 'This device' }, { value: 'photos', label: 'Pocket Photos', disabled: !f.photos_configured, title: f.photos_configured ? undefined : 'Connect Pocket Photos first' }, { value: 'files', label: 'Pocket Files', disabled: !f.files_configured, title: f.files_configured ? undefined : 'Connect Pocket Files first' }]} />
+          <Select ariaLabel="Save to" value={f.save_to} onChange={v => setF({ ...f, save_to: v as SettingsT['save_to'] })} options={[{ value: 'download', label: 'This device' }, ...(['photos', 'files', 'blog', 'chat', 'notes', 'documents'] as const).map(k => ({ value: k, label: `Pocket ${k[0].toUpperCase()}${k.slice(1)}`, disabled: !f[`${k}_configured`], hint: f[`${k}_configured`] ? undefined : 'not connected' }))]} />
         </SettingRow>
         <SettingRow title="Folder in Pocket Files" help="In My files; made when it isn't there."><input value={f.files_folder} onChange={e => setF({ ...f, files_folder: e.target.value })} placeholder="/Photo Lab" /></SettingRow>
         <SettingRow title="Stack on the original in Pocket Photos" help="A copy of a picture that came from Pocket Photos goes on top of its original, in one stack, instead of beside it."><Switch checked={f.stack_photos} onChange={v => setF({ ...f, stack_photos: v })} label="Stack" /></SettingRow>
@@ -196,6 +196,42 @@ function Integrations() {
           direct={<div className="two-col tight">
             <Field label="URL"><input value={f.files_url} onChange={e => setF({ ...f, files_url: e.target.value })} placeholder="http://host.docker.internal:8187" /></Field>
             <Field label="API token" help="Pocket Files → Settings → API tokens"><input value={f.files_token} onChange={e => setF({ ...f, files_token: e.target.value })} autoComplete="off" /></Field>
+          </div>} />
+      </Section>
+      <Section title="Pocket Blog — start a post" icon="blog" actions={connBadge(eff(f.blog_mode), f.blog_via)} sub="A finished picture starts a draft post with the picture on top (and as its cover) for you to finish.">
+        <Connection app="Pocket Blog" mode={f.blog_mode} via={f.blog_via} detail={f.blog_detail} core={coreOn} hasToken={!!f.blog_token}
+          onMode={m => save({ blog_mode: m })} onDisconnect={() => save({ blog_url: '', blog_token: '' })}
+          test={<><button type="button" className="btn sm" onClick={() => run('blog', f.blog_url, f.blog_token)}>Test connection</button>{status('blog')}</>}
+          direct={<div className="two-col tight">
+            <Field label="URL"><input value={f.blog_url} onChange={e => setF({ ...f, blog_url: e.target.value })} placeholder="http://host.docker.internal:8246" /></Field>
+            <Field label="API token" help="Pocket Blog → Settings → API tokens"><input value={f.blog_token} onChange={e => setF({ ...f, blog_token: e.target.value })} autoComplete="off" /></Field>
+          </div>} />
+      </Section>
+      <Section title="Pocket Chat — send it" icon="chat" actions={connBadge(eff(f.chat_mode), f.chat_via)} sub="Send a finished picture into one of your conversations, with a message.">
+        <Connection app="Pocket Chat" mode={f.chat_mode} via={f.chat_via} detail={f.chat_detail} core={coreOn} hasToken={!!f.chat_token}
+          onMode={m => save({ chat_mode: m })} onDisconnect={() => save({ chat_url: '', chat_token: '' })}
+          test={<><button type="button" className="btn sm" onClick={() => run('chat', f.chat_url, f.chat_token)}>Test connection</button>{status('chat')}</>}
+          direct={<div className="two-col tight">
+            <Field label="URL"><input value={f.chat_url} onChange={e => setF({ ...f, chat_url: e.target.value })} placeholder="http://host.docker.internal:8247" /></Field>
+            <Field label="API token" help="Pocket Chat → Settings → API tokens"><input value={f.chat_token} onChange={e => setF({ ...f, chat_token: e.target.value })} autoComplete="off" /></Field>
+          </div>} />
+      </Section>
+      <Section title="Pocket Notes — keep it in a note" icon="note" actions={connBadge(eff(f.notes_mode), f.notes_via)} sub="A finished picture goes into a new note, with a title and text.">
+        <Connection app="Pocket Notes" mode={f.notes_mode} via={f.notes_via} detail={f.notes_detail} core={coreOn} hasToken={!!f.notes_token}
+          onMode={m => save({ notes_mode: m })} onDisconnect={() => save({ notes_url: '', notes_token: '' })}
+          test={<><button type="button" className="btn sm" onClick={() => run('notes', f.notes_url, f.notes_token)}>Test connection</button>{status('notes')}</>}
+          direct={<div className="two-col tight">
+            <Field label="URL"><input value={f.notes_url} onChange={e => setF({ ...f, notes_url: e.target.value })} placeholder="http://host.docker.internal:8182" /></Field>
+            <Field label="API token" help="Pocket Notes → Settings → API tokens"><input value={f.notes_token} onChange={e => setF({ ...f, notes_token: e.target.value })} autoComplete="off" /></Field>
+          </div>} />
+      </Section>
+      <Section title="Pocket Documents — file it" icon="file" actions={connBadge(eff(f.documents_mode), f.documents_via)} sub="A finished picture (a scan, a receipt) is filed in your document archive and read by its text recognition.">
+        <Connection app="Pocket Documents" mode={f.documents_mode} via={f.documents_via} detail={f.documents_detail} core={coreOn} hasToken={!!f.documents_token}
+          onMode={m => save({ documents_mode: m })} onDisconnect={() => save({ documents_url: '', documents_token: '' })}
+          test={<><button type="button" className="btn sm" onClick={() => run('documents', f.documents_url, f.documents_token)}>Test connection</button>{status('documents')}</>}
+          direct={<div className="two-col tight">
+            <Field label="URL"><input value={f.documents_url} onChange={e => setF({ ...f, documents_url: e.target.value })} placeholder="http://host.docker.internal:8183" /></Field>
+            <Field label="API token" help="Pocket Documents → Settings → API tokens"><input value={f.documents_token} onChange={e => setF({ ...f, documents_token: e.target.value })} autoComplete="off" /></Field>
           </div>} />
       </Section>
       <Section title="Other Pocket apps" icon="layers" sub="Photo Lab offers your edits to the rest of the box through Pocket Core, so other apps can show or send pictures here.">

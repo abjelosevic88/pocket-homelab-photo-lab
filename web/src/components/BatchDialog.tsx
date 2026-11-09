@@ -22,7 +22,8 @@ export function BatchDialog({ images, onClose, onDone, initialLook = '' }: { ima
   const [look, setLook] = useState(initialLook)
   const [strength, setStrength] = useState(100)
   const [mode, setMode] = useState<'save' | 'lab'>('save')
-  const [o, setO] = useSaveDefaults()
+  const [o0, setO] = useSaveDefaults()
+  const o = ['download', 'photos', 'files'].includes(o0.dest) ? o0 : { ...o0, dest: 'download' as const }
   const [pattern, setPattern] = useState(settings?.export_name || '{title}-edited')
   const [progress, setProgress] = useState<{ done: number; failed: string[] } | null>(null)
   const [busy, setBusy] = useState(false)
@@ -85,7 +86,7 @@ export function BatchDialog({ images, onClose, onDone, initialLook = '' }: { ima
             </div>
           </Field>
           {mode === 'save' && <>
-            <SaveFields o={o} setO={setO} />
+            <SaveFields o={o} setO={setO} destinations="basic" />
             <Field label="Names" help="{title} the picture's name, {n} its number, {date} today, {w}×{h} its size."><input value={pattern} onChange={e => setPattern(e.target.value)} /></Field>
           </>}
           {mode === 'lab' && <p className="muted small">The look becomes part of each picture's edit (you can still change or undo it there). Nothing is downloaded.</p>}

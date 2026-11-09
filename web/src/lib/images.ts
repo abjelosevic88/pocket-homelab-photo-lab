@@ -68,7 +68,7 @@ export async function saveLook(id: number, blob: Blob): Promise<void> {
 }
 
 /** Records a finished picture and, for Photos and Files, takes it there. */
-export async function sendExport(meta: { image_id?: number; destination: SaveTo; name: string; format: string; width: number; height: number; bytes: number; folder?: string; space?: string }, blob?: Blob): Promise<{ export: Export; open_url?: string }> {
+export async function sendExport(meta: { image_id?: number; destination: SaveTo; name: string; format: string; width: number; height: number; bytes: number; folder?: string; space?: string; conversation?: number; text?: string; title?: string }, blob?: Blob): Promise<{ export: Export; open_url?: string; stacked?: boolean; stack_error?: string }> {
   if (meta.destination === 'download' || !blob) return api.post(`${V1}/exports`, meta)
   const fd = new FormData()
   fd.append('meta', JSON.stringify(meta))
