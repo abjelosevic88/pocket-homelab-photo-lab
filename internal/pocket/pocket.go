@@ -74,12 +74,16 @@ func (c *Client) do(ctx context.Context, method, path string, q url.Values, body
 	}
 	if res.StatusCode >= 300 {
 		var e struct {
-			Error string `json:"error"`
+			Error   string `json:"error"`
+			Message any    `json:"message"`
 		}
 		b, _ := io.ReadAll(io.LimitReader(res.Body, 2000))
 		_ = json.Unmarshal(b, &e)
 		if e.Error != "" {
 			return fmt.Errorf("HTTP %d: %s", res.StatusCode, e.Error)
+		}
+		if e.Message != nil {
+			return fmt.Errorf("HTTP %d: %v", res.StatusCode, e.Message)
 		}
 		return fmt.Errorf("HTTP %d", res.StatusCode)
 	}
@@ -194,25 +198,24 @@ type Asset struct {
 }
 
 // SearchPhotos lists pictures, newest first, or the best matches for a
-// description when query is set. cursor/page continue a listing.
+// description when query is set; cursor continues a listing. The body is
+// Immich's search with a filter object, as Pocket Photos' own gallery sends it.
 func (c *Client) SearchPhotos(ctx context.Context, query, cursor string, size int, favorites bool) ([]Asset, string, error) {
-	body := map[string]any{"type": "IMAGE", "size": size, "withExif": true}
+	filter := map[string]any{"trashedAt": map[string]any{"eq": nil}, "type": map[string]any{"eq": "IMAGE"}}
+	if favorites {
+		filter["isFavorite"] = map[string]any{"eq": true}
+	}
+	body := map[string]any{"filter": filter, "size": size, "withExif": true}
 	path := "/api/v1/immich/search/metadata"
 	if query != "" {
 		path = "/api/v1/immich/search/smart"
 		body["query"] = query
 	} else {
+		filter["visibility"] = map[string]any{"eq": "timeline"}
 		body["orderBy"] = map[string]string{"field": "fileCreatedAt", "direction": "desc"}
 		if cursor != "" {
-			if len(cursor) < 6 {
-				body["page"] = cursor
-			} else {
-				body["cursor"] = cursor
-			}
+			body["cursor"] = cursor
 		}
-	}
-	if favorites {
-		body["isFavorite"] = true
 	}
 	var out struct {
 		Assets struct {
