@@ -1,0 +1,5 @@
+# Pocket Photo Lab behind Caddy. Homepage widgets and linked apps send their own
+# bearer token to /api/*.
+photolab.example.com {
+	reverse_proxy pocket-photolab:8080
+}
