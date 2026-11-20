@@ -7,4 +7,4 @@ Two things to keep: the SQLite file `DATA_DIR/pocket-photolab.db` (accounts, edi
 
 Restore: stop the app, put back `pocket-photolab.db` (remove `-wal`/`-shm` files) and `images/`, start.
 
-Every person can also download everything of theirs as a ZIP (originals, current looks, `export.json`) from Settings → Backup & data, and export/import their edits and looks as JSON.
+Every person can also download everything of theirs as a ZIP (originals, current looks, `export.json`) from Settings → Backup & data, and export/import their edits and looks as JSON. Importing the ZIP (`POST /api/v1/import`, the raw body as `application/zip` or the multipart field `file`) adds its pictures with their edits, versions and looks; pictures already here (same bytes) are not added again. Pocket Move can copy your pictures out and bring them in (`move:export` / `move:import` links, described at `GET /api/v1/pocket/portable`).

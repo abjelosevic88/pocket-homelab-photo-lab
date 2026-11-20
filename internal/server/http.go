@@ -122,6 +122,7 @@ func (s *Server) Router() http.Handler {
 			r.Get("/export.csv", s.handleExportCSV)
 			r.Get("/export.zip", s.handleExportZip)
 			r.Post("/import", s.handleImportJSON)
+			r.Get(strings.TrimPrefix(core.PortablePath, "/api/v1"), portable.Handler())
 		})
 	})
 

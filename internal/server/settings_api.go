@@ -5,10 +5,12 @@ import (
 	"context"
 	"encoding/csv"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
+	"path"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -424,7 +426,17 @@ func (s *Server) handleExportCSV(w http.ResponseWriter, r *http.Request) {
 // handleImportJSON merges an export into the caller's own data: looks by
 // name, and edits, titles and versions for pictures that are already here
 // (matched by their bytes). Importing the same file twice adds nothing.
+//
+// It also takes export.zip (the raw body, or the multipart field "file", as
+// Pocket Move sends it): the originals in it come in first (a picture
+// already here, by its bytes, is not added again), then its export.json.
 func (s *Server) handleImportJSON(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	uid := actorID(ctx)
+	if ct := r.Header.Get("Content-Type"); strings.HasPrefix(ct, "multipart/") || strings.HasPrefix(ct, "application/zip") {
+		s.importZip(w, r)
+		return
+	}
 	var doc exportDoc
 	if err := decode(r, &doc); err != nil {
 		writeErr(w, http.StatusBadRequest, "invalid json")
@@ -434,9 +446,15 @@ func (s *Server) handleImportJSON(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "this is not a Pocket Photo Lab export")
 		return
 	}
-	ctx := r.Context()
-	uid := actorID(ctx)
-	counts := map[string]int{}
+	writeJSON(w, http.StatusOK, s.importDoc(ctx, uid, doc, nil))
+}
+
+// importDoc merges an export into person uid's data; counts may already
+// hold what came before it (the pictures of a zip).
+func (s *Server) importDoc(ctx context.Context, uid int64, doc exportDoc, counts map[string]int) map[string]int {
+	if counts == nil {
+		counts = map[string]int{}
+	}
 	have, _ := s.store.ListPresets(ctx, uid)
 	names := map[string]bool{}
 	for _, p := range have {
@@ -468,6 +486,8 @@ func (s *Server) handleImportJSON(w http.ResponseWriter, r *http.Request) {
 		}
 		if !mine.Edited && json.Valid(im.Recipe) {
 			mine.Recipe, mine.Edited, mine.EditedAt = im.Recipe, im.Edited, im.EditedAt
+			// the next browser that opens the lab draws its look
+			mine.Stale = mine.Stale || (mine.Edited && mine.Preview == "")
 		}
 		mine.Title, mine.Note, mine.Favorite = firstNonEmpty(im.Title, mine.Title), firstNonEmpty(mine.Note, im.Note), mine.Favorite || im.Favorite
 		if err := s.store.UpdateImage(ctx, uid, mine); err == nil {
@@ -494,7 +514,95 @@ func (s *Server) handleImportJSON(w http.ResponseWriter, r *http.Request) {
 			counts["versions"]++
 		}
 	}
-	writeJSON(w, http.StatusOK, counts)
+	return counts
+}
+
+// zipImportLimit caps an export.zip brought in (every original of a person).
+const zipImportLimit = 8 << 30
+
+// importZip brings in an export.zip: its originals, then its export.json.
+func (s *Server) importZip(w http.ResponseWriter, r *http.Request) {
+	ctx := context.WithoutCancel(r.Context()) // a whole library can take longer than the API's time limit
+	uid := actorID(ctx)
+	var ra io.ReaderAt
+	var size int64
+	if strings.HasPrefix(r.Header.Get("Content-Type"), "multipart/") {
+		r.Body = http.MaxBytesReader(w, r.Body, zipImportLimit)
+		if err := r.ParseMultipartForm(32 << 20); err != nil {
+			writeErr(w, http.StatusBadRequest, "send export.zip as the multipart field \"file\"")
+			return
+		}
+		defer r.MultipartForm.RemoveAll()
+		f, fh, err := r.FormFile("file")
+		if err != nil {
+			writeErr(w, http.StatusBadRequest, "send export.zip as the multipart field \"file\"")
+			return
+		}
+		defer f.Close()
+		ra, size = f, fh.Size
+	} else {
+		tmp, err := os.CreateTemp("", "photolab-import-*.zip")
+		if err != nil {
+			s.fail(w, err, "import")
+			return
+		}
+		defer os.Remove(tmp.Name())
+		defer tmp.Close()
+		if size, err = io.Copy(tmp, http.MaxBytesReader(w, r.Body, zipImportLimit)); err != nil {
+			writeErr(w, http.StatusRequestEntityTooLarge, "the file is too large")
+			return
+		}
+		ra = tmp
+	}
+	zr, err := zip.NewReader(ra, size)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "this is not a Pocket Photo Lab export.zip")
+		return
+	}
+	var doc exportDoc
+	counts := map[string]int{"pictures added": 0}
+	for _, zf := range zr.File {
+		if zf.Name == "export.json" {
+			rc, err := zf.Open()
+			if err == nil {
+				err = json.NewDecoder(io.LimitReader(rc, 256<<20)).Decode(&doc)
+				rc.Close()
+			}
+			if err != nil || (doc.App != "" && doc.App != "pocket-photolab") {
+				writeErr(w, http.StatusBadRequest, "this is not a Pocket Photo Lab export.zip")
+				return
+			}
+		}
+	}
+	for _, zf := range zr.File {
+		if !strings.HasPrefix(zf.Name, "originals/") || zf.FileInfo().IsDir() {
+			continue
+		}
+		rc, err := zf.Open()
+		if err != nil {
+			counts["skipped"]++
+			continue
+		}
+		data, err := io.ReadAll(io.LimitReader(rc, s.cfg.MaxUploadBytes+1))
+		rc.Close()
+		if err != nil {
+			counts["skipped"]++
+			continue
+		}
+		_, fresh, err := s.addImage(ctx, uid, newImage{data: data, name: path.Base(zf.Name), source: "import"})
+		switch {
+		case err != nil:
+			var ue *userErr
+			if !errors.As(err, &ue) {
+				s.fail(w, err, "import")
+				return
+			}
+			counts["skipped"]++
+		case fresh:
+			counts["pictures added"]++
+		}
+	}
+	writeJSON(w, http.StatusOK, s.importDoc(ctx, uid, doc, counts))
 }
 
 // handleExportZip downloads everything of one person's: every original, the
