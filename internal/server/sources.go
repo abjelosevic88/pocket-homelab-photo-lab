@@ -12,6 +12,7 @@ import (
 	"net/textproto"
 	"net/url"
 	"path"
+	"strconv"
 	"strings"
 	"time"
 
@@ -54,6 +55,10 @@ type photoItem struct {
 	Mime     string `json:"mime"`
 	Favorite bool   `json:"favorite"`
 	Place    string `json:"place"`
+	// for Pocket AI's "@photolab #" picker and its agents: the photo in the
+	// editor (brought in on open) and its thumbnail, both behind sign-in
+	ItemURL  string `json:"item_url,omitempty"`
+	ThumbURL string `json:"thumb_url,omitempty"`
 }
 
 // handlePhotosSearch lists the person's photos (newest first) or the best
@@ -66,7 +71,11 @@ func (s *Server) handlePhotosSearch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	q := r.URL.Query()
-	assets, next, err := c.client.SearchPhotos(ctx, strings.TrimSpace(q.Get("q")), q.Get("cursor"), 120, queryBool(r, "favorites"))
+	size := 120
+	if n, err := strconv.Atoi(q.Get("limit")); err == nil && n > 0 && n < size {
+		size = n
+	}
+	assets, next, err := c.client.SearchPhotos(ctx, strings.TrimSpace(q.Get("q")), q.Get("cursor"), size, queryBool(r, "favorites"))
 	if err != nil {
 		writeErr(w, http.StatusBadGateway, "Pocket Photos: "+err.Error())
 		return
@@ -77,6 +86,10 @@ func (s *Server) handlePhotosSearch(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		it := photoItem{ID: a.ID, Name: a.OriginalFileName, TakenAt: firstNonEmpty(a.LocalDateTime, a.FileCreatedAt), Width: a.Width, Height: a.Height, Mime: a.OriginalMimeType, Favorite: a.IsFavorite}
+		if base := strings.TrimRight(s.cfg.BaseURL, "/"); base != "" && validAssetID(a.ID) {
+			it.ItemURL = base + "/open?photos=" + a.ID
+			it.ThumbURL = base + "/api/v1/sources/photos/" + a.ID + "/thumb"
+		}
 		if a.ExifInfo != nil {
 			if it.Width == 0 {
 				it.Width, it.Height = a.ExifInfo.ExifImageWidth, a.ExifInfo.ExifImageHeight
